@@ -49,8 +49,8 @@ state_dict = torch.load(model_path)
 model.load_state_dict(state_dict)
 # model = LlamaForCausalLM.from_pretrained(model_path)
 
-train_args['bf16'] = False
-train_args['bf16_full_eval'] = False
+train_args['bf16'] = True
+train_args['bf16_full_eval'] = True
 train_args['fp16'] = False
 train_args['fp16_full_eval'] = False
 
