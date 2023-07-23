@@ -193,11 +193,6 @@ class LlamaLayer(nn.Module):
         value = torch.repeat_interleave(value, dim=1, repeats=self.num_key_value_groups)
         attention_mask = attention_mask if attention_mask is not None else torch.ones((query.shape[0], query.shape[1])).to(hidden_states.device)
         
-        if torch.distributed.get_rank() == 0:
-            print(torch.any(torch.isnan(query)))
-            if torch.any(torch.isnan(query)):
-                raise ValueError
-        
         if self.config.use_flash:
             assert FlashAttention is not None, \
                 "Detected flash_attn is not installed. See https://github.com/HazyResearch/flash-attention"

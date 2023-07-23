@@ -1,4 +1,5 @@
 *.pyc
 checkpoints/
 caches/
+wandb/
 __pycache__
