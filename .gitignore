@@ -1,1 +1,4 @@
 *.pyc
+checkpoints/
+caches/
+__pycache__

@@ -15,7 +15,7 @@ from utils.clm_tools import DataCollatorForCausalLM
 
 import os
 
-torch.set_default_dtype(torch.bfloat16)  # float32, bfloat16
+torch.set_default_dtype(torch.float16)  # float32, float16, bfloat16
 
 max_length = 512
 model_tag = 'clm_arxiv_1'
@@ -38,21 +38,21 @@ model_path = f'/remote-home/xrliu/projects/FEPE-deepspeed/checkpoints/{key}/trai
 
 config = AutoConfig.from_pretrained('/remote-home/share/llama_hf/7B')
 config.gradient_checkpointing = True
-config.torch_dtype = torch.bfloat16
+config.torch_dtype = torch.float16
 config.hidden_size = model_args['hidden_size']  # 4096
 config.intermediate_size = model_args['intermediate_size']  # 11008
 config.num_attention_heads = model_args['num_attention_heads']  # 32
 config.num_hidden_layers = model_args['num_hidden_layers']  # 32
 
-model = LlamaForCausalLM(config=config, pe_config=pe_config).bfloat16()  # float()
+model = LlamaForCausalLM(config=config, pe_config=pe_config).half()  # float, half, bfloat16
 state_dict = torch.load(model_path)
 model.load_state_dict(state_dict)
 # model = LlamaForCausalLM.from_pretrained(model_path)
 
-train_args['bf16'] = True
-train_args['bf16_full_eval'] = True
-train_args['fp16'] = False
-train_args['fp16_full_eval'] = False
+train_args['bf16'] = False
+train_args['bf16_full_eval'] = False
+train_args['fp16'] = True
+train_args['fp16_full_eval'] = True
 
 rank = int(os.environ["LOCAL_RANK"])
 size = int(os.environ["WORLD_SIZE"])
@@ -98,7 +98,8 @@ if rank == 0:
     print(UpperDataset(length=10, number=size)[0])
 
 eval_datasets = {}
-prefix_list = ['32', '512', '10240', '40960', '51200', '61440', '65536', '71680', '81920']  #
+prefix_list = ['32', '512', '7168', '8192', '9216', '10240']  #
+# prefix_list = ['32', '512', '10240', '40960', '51200', '61440', '65536', '71680', '81920']  #
 # prefix_list = ['512', '1024', '2048', '3072', '4096', '5120', '6144', '7168', '8192', '9216', '10240', ]  #
 
 """
@@ -123,6 +124,14 @@ prefix_list = ['32', '512', '10240', '40960', '51200', '61440', '65536', '71680'
     'eval_65536_acc': 0.207309 , 'eval_65536_ppl': 2256.0 ,
     'eval_71680_acc': 0.0 , 'eval_71680_ppl': nan ,
     'eval_81920_acc': 0.0 , 'eval_81920_ppl': nan ,
+}
+'torch init version & fp16': {
+    'eval_32_acc': 0.129032 , 'eval_32_ppl': 7264.0 ,
+    'eval_512_acc': 0.365949 , 'eval_512_ppl': 748.0 ,
+    'eval_7168_acc': 0.352449 , 'eval_7168_ppl': 700.0 ,
+    'eval_8192_acc': 0.0 , 'eval_8192_ppl': nan ,
+    'eval_9216_acc': 0.0 , 'eval_9216_ppl': nan ,
+    'eval_10240_acc': 0.0 , 'eval_10240_ppl': nan ,
 }
 """
 
