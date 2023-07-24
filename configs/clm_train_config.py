@@ -7,15 +7,15 @@
 
 model_args = {
     '330M': {
-        'tag': '330M', 'tokenizer': '/remote-home/share/llama_hf/7B',  # "vocab_size": 32000
+        'size': '330M', 'tokenizer': '/remote-home/share/llama_hf/7B',  # "vocab_size": 32000
         'hidden_size': 1024, 'intermediate_size': 4096, 'num_attention_heads': 16, 'num_hidden_layers': 16,
     },
     '3B': {
-        'tag': '3B', 'tokenizer': 'openlm-research/open_llama_3b',  # "vocab_size": 32000
+        'size': '3B', 'tokenizer': 'openlm-research/open_llama_3b',  # "vocab_size": 32000
         'hidden_size': 3200, 'intermediate_size': 8640, 'num_attention_heads': 32, 'num_hidden_layers': 26,
     },
     '7B': {
-        'tag': '7B', 'tokenizer': 'openlm-research/open_llama_7b',  # "vocab_size": 32000
+        'size': '7B', 'tokenizer': 'openlm-research/open_llama_7b',  # "vocab_size": 32000
         'hidden_size': 4096, 'intermediate_size': 11008, 'num_attention_heads': 32, 'num_hidden_layers': 32,
     },
 }
@@ -23,8 +23,8 @@ model_args = {
 train_args = {
     ('330M', 512): {
         'max_length': 512, 'train_micro_batch_size': 48, 'eval_batch_size': 1, 
-        'train_epochs': 10, 'optim': 'adamw', 'learning_rate': 0.00015, 'weight_decay': 0.01, 
-        'lr_scheduler_type': 'linear', 'warmup_ratio': 0.1, 'max_grad_value': 1.0,
+        'train_epochs': 1, 'optim': 'adamw', 'learning_rate': 0.00015, 'weight_decay': 0.01, 
+        'lr_scheduler_type': 'linear', 'warmup_ratio': 0.4, 'max_grad_value': 1.0,
         'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 1,
 
         # 'per_device_train_batch_size': 12, 'per_device_eval_batch_size': 12, 'num_train_epochs': 10,  # 4 cards

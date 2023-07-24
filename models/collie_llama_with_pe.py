@@ -38,33 +38,107 @@ from transformers.modeling_utils import dtype_byte_size
 from transformers.modeling_utils import PretrainedConfig
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
+# {'exp': True if args.exp == 'xpos' else False, '1d': True if args.dim == '1d' else False, 
+#  'imp': True if args.imp == 'imp' else False, 'log': True if args.log == 'log' else False, }
+
+
+def rotate_half(x):
+    """Rotates half the hidden dims of the input."""
+    x1 = x[..., :x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2:]
+    return torch.cat((-x2, x1), dim=-1)
+    # return torch.stack([-x[..., 1::2], x[..., ::2]], dim=-1).reshape_as(x)
+
+
 class RotaryPositionEmbedding(nn.Module):
-    def __init__(self, head_dim: int) -> None:
+    def __init__(self, head_dim: int, config) -> None:
         super().__init__()
-        inv_freq = 1.0 / (10000.0 ** (
-            torch.arange(0, head_dim, 2)[: (head_dim // 2)].float() / head_dim))
-        self.register_buffer('inv_freq', inv_freq)  # lxr：直接换掉旋转角
+        self.pe_config = config.pe_config
+        
+        # batch_size, seq_len, n_head (fixed for tp), head_dim 
+        
+        if self.pe_config['imp']:
+            order, beta = 3,  1 / math.log(10000.0)  # 0.10861
+            start, end = math.pow(0.0005, 1 / order), math.pow(0.9999, 1 / order)  # 
+            if self.pe_config['1d']:
+                omega = torch.pow(torch.linspace(start, end, head_dim), order).reshape((1, -1)) * beta * 2
+            else:
+                omega = torch.pow(torch.linspace(start, end, head_dim // 2), order).reshape((1, -1)) * beta * 2
+                omega = torch.cat([omega, omega], dim=-1)
+            expos = (beta / omega) / (1/order * torch.pow(omega, 1/order - 1) * math.pow(2 * beta, -1/order))
+        else:
+            if self.pe_config['1d']:
+                omega = 1.0 / (10000.0 ** (torch.arange(0, head_dim, 1).float() / head_dim)).reshape((1, -1))
+            else:
+                omega = 1.0 / (10000.0 ** (torch.arange(0, head_dim, 2).float() / head_dim)).reshape((1, -1))
+                omega = torch.cat([omega, omega], dim=-1)
+            expos = torch.ones_like(omega)
+        self.register_buffer("omega", omega, persistent=False)
+        self.register_buffer("expos", torch.sqrt(expos), persistent=False)
+
+        if self.pe_config['exp']:
+            if self.pe_config['imp']:
+                scale = - torch.log(omega) / math.log(10000.0) * head_dim
+            else:
+                scale = torch.arange(0, head_dim, 1 if self.pe_config['1d'] else 2).float()
+                scale = scale if self.pe_config['1d'] else torch.cat([scale, scale], dim=-1)
+            self.register_buffer("scale", ((scale + 0.4 * head_dim) / (1.4 * head_dim)), persistent=False)
+
+        # inv_freq = 1.0 / (10000.0 ** (
+        #     torch.arange(0, head_dim, 2)[: (head_dim // 2)].float() / head_dim))
+        # self.register_buffer('inv_freq', inv_freq)  # lxr：直接换掉旋转角
 
     def forward(self,
                 query: torch.Tensor,
                 key: torch.Tensor,
                 seq_len: int,
                 start_pos: int = 0):
-        t = query.dtype
-        query = torch.view_as_complex(
-            query.float().reshape(*query.shape[:-1], -1, 2))
-        key = torch.view_as_complex(
-            key.float().reshape(*key.shape[:-1], -1, 2))
-        freqs = torch.outer(torch.arange(
-            (2 ** 16) * 2, device=self.inv_freq.device), self.inv_freq).float()
-        freqs_cis = torch.polar(torch.ones_like(freqs), freqs)[
-            start_pos: start_pos + seq_len]
-        shape = [d if i == 1 or i == query.ndim -
-                 1 else 1 for i, d in enumerate(query.shape)]
-        freqs_cis = freqs_cis.view(*shape)
-        query = torch.view_as_real(query * freqs_cis).flatten(3)
-        key = torch.view_as_real(key * freqs_cis).flatten(3)  # lxr：1d：可以在这个地方把q k维度扩张1倍；imp：head_dim是并行无关的；log：seq_len+start_pos是真正的t的下标；exp：s下标是从start_pos到start_pos+seq_len
-        return query.type(t), key.type(t)
+        dtype = query.dtype
+        
+        # batch_size, seq_len, n_head (fixed for tp), head_dim 
+        
+        t = torch.arange(start_pos, start_pos + seq_len, 
+                         device=query.device, dtype=self.omega.dtype).reshape(-1, 1)
+        theta = self.omega[None, :, None, :] * t[None, :, None, :]
+        sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos[None, :, None, :]
+
+        q, k = query * expos, key * expos
+
+        if self.pe_config['1d']:
+            q_real = torch.cat([q * cos, q * sin], dim=-1)
+            k_real = torch.cat([k * cos, k * sin], dim=-1)
+            # q_imag = torch.cat([q * sin, -q * cos], dim=-1)
+        else:
+            q_real = q * cos + rotate_half(q) * sin
+            k_real = k * cos + rotate_half(k) * sin
+            # q_imag = q * sin - rotate_half(q) * cos
+
+        if self.pe_config['exp']:
+            scale = self.rotary_emb.scale ** ((t - start_pos - seq_len // 2) / 512)
+            scale = scale if not self.pe_config['1d'] else torch.cat([scale, scale], dim=-1)
+            q_real = q_real * scale[None, :, None, :]
+            k_real = k_real / scale[None, :, None, :]
+
+        if self.pe_config['log']:
+            base = math.log(self.pe_config['base']) if 'base' in self.pe_config else 1
+            q_real = q_real * torch.log(t+1)[None, :, None, :] / base
+
+        # query = torch.view_as_complex(
+        #     query.float().reshape(*query.shape[:-1], -1, 2))
+        # key = torch.view_as_complex(
+        #     key.float().reshape(*key.shape[:-1], -1, 2))
+        # freqs = torch.outer(torch.arange(
+        #     (2 ** 16) * 2, device=self.inv_freq.device), self.inv_freq).float()
+        # freqs_cis = torch.polar(torch.ones_like(freqs), freqs)[
+        #     start_pos: start_pos + seq_len]
+        # shape = [d if i == 1 or i == query.ndim -
+        #          1 else 1 for i, d in enumerate(query.shape)]
+        # freqs_cis = freqs_cis.view(*shape)
+        # query = torch.view_as_real(query * freqs_cis).flatten(3)
+        # key = torch.view_as_real(key * freqs_cis).flatten(3)  # lxr：1d：可以在这个地方把q k维度扩张1倍；imp：head_dim是并行无关的；log：seq_len+start_pos是真正的t的下标；exp：s下标是从start_pos到start_pos+seq_len
+        
+        
+        return q_real.type(dtype), k_real.type(dtype)
 
 class RMSNormalize(nn.Module):
     def __init__(self, dim=None, dtype=torch.float, eps=1e-5, weight=None):
@@ -124,7 +198,9 @@ class LlamaLayer(nn.Module):
                     init_method=lambda x: x
                 ),
                 "rotary_emb": RotaryPositionEmbedding(
-                    self.config.hidden_size // self.config.num_attention_heads)
+                    self.config.hidden_size // self.config.num_attention_heads,
+                    config=config
+                ),
             }
         )
         self.input_layernorm = RMSNormalize(
@@ -199,7 +275,7 @@ class LlamaLayer(nn.Module):
             qkv = torch.stack([query, key, value], dim=2)
             output = FlashAttention()(qkv, key_padding_mask=attention_mask.bool(), causal=True)
             
-            """ note:
+            """ flash_attn_2 note: 
                 from flash_attn.modules.mha import SelfAttention as FlashAttention
                 require attention_mask as a bool tensor
                 replace 'output, _ =' as 'output =' 
@@ -439,9 +515,6 @@ class LlamaForCausalLM(CollieModelForCausalLM):
                             state_dict.update(part_state_dict)
                             del part_state_dict
                 elif format == "meta":
-                    # meta 权重的格式，需要补充 inv_freq 的权重
-                    inv_freq = 1.0 / (10000.0 ** (torch.arange(0, (config.hidden_size // config.num_attention_heads),
-                                2).float() / (config.hidden_size // config.num_attention_heads)))
                     # 根据 meta 中的 params.json 更新一下用户配置
                     if io_driver.exists(os.path.join(path, "params.json")):
                         params = json.loads(io_driver.load(os.path.join(path, "params.json"), mode="r"))
@@ -463,11 +536,8 @@ class LlamaForCausalLM(CollieModelForCausalLM):
                             for key in list(part_state_dict.keys()):
                                 # if key.startswith("layers"):
                                 #     layer = int(key.split(".")[1])
-                                #     # meta 权重的格式，需要补充 inv_freq 的权重
-                                #     part_state_dict[f"layers.{layer}.self_attn.rotary_emb.inv_freq"] = inv_freq
                                 raw_key = key
                                 key = key.replace("attention", "self_attn")
-                                key = key.replace("inner_self_attn.rope.freqs", "rotary_emb.inv_freq")
                                 key = key.replace("wo", "o_proj")
                                 key = key.replace("wq", "q_proj")
                                 key = key.replace("wk", "k_proj")

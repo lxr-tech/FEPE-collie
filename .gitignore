@@ -1,5 +1,11 @@
 *.pyc
+__pycache__
+
 checkpoints/
 caches/
+
 wandb/
-__pycache__
+csv_logs/
+
+nohup_logs/
+nohup.out

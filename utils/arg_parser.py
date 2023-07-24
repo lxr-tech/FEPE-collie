@@ -24,7 +24,9 @@ def arg_parse():
     # parser.add_argument('--ffn_fp', type=str, default='fp32', choices=['fp32', 'fp16', 'bf16'])
     # parser.add_argument('--norm_fp', type=str, default='fp32', choices=['fp32', 'fp16', 'bf16'])
 
-    parser.add_argument('--key', type=str, default=' ')
+    parser.add_argument('--tag', type=str, default='')
+    parser.add_argument('--group', type=str, default='')
+
     parser.add_argument('--max_length', type=int, default=512)
     parser.add_argument('--model_size', type=str, default='330M', choices=['330M', '3B', '7B'])
 
@@ -42,14 +44,14 @@ def arg_parse():
 
     model_size, max_length = args.model_size, args.max_length
 
-    assert args.key != ''
+    assert args.tag != '' and args.group != ''
 
-    key = args.key
+    tag, group = args.tag, args.group
 
     assert model_size in model_args and (model_size, max_length) in train_args
 
     model_arg, train_arg = model_args[model_size], train_args[(model_size, max_length)]
 
-    return key, pe_config, model_arg, train_arg  # fp_config, hp_config
+    return tag, group, pe_config, model_arg, train_arg  # fp_config, hp_config
 
 
