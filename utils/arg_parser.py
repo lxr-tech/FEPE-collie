@@ -13,6 +13,9 @@ def arg_parse():
     parser.add_argument('--exp', type=str, default='rope', choices=['rope', 'xpos'])
     parser.add_argument('--imp', type=str, default='inv', choices=['inv', 'imp'])
     parser.add_argument('--log', type=str, default='raw', choices=['raw', 'log'])
+    
+    parser.add_argument('--log_base', type=float, default=torch.e)
+    parser.add_argument('--exp_base', type=float, default=512.)
 
     # parser.add_argument('--post_norm_attn', type=str, default='false')
     # parser.add_argument('--post_norm_ffn', type=str, default='false')
@@ -38,7 +41,8 @@ def arg_parse():
     #              'norm_fp': fp[args.norm_fp], 'ffn_fp': fp[args.ffn_fp], }
 
     pe_config = {'exp': True if args.exp == 'xpos' else False, '1d': True if args.dim == '1d' else False, 
-                 'imp': True if args.imp == 'imp' else False, 'log': True if args.log == 'log' else False, }
+                 'imp': True if args.imp == 'imp' else False, 'log': True if args.log == 'log' else False, 
+                 'exp_base': args.exp_base, 'log_base': args.log_base, }
 
     # hp_config = {'init': args.post_init, 'post': args.post_norm_attn, 'both': args.post_norm_ffn, }
 

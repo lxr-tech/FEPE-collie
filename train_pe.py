@@ -8,14 +8,15 @@ from datetime import datetime
 from transformers import get_linear_schedule_with_warmup
 
 from collie import CollieConfig, Trainer, env
-from collie import EvaluatorForPerplexity, PPLMetric
+from collie import EvaluatorForPerplexity, PPLMetric, AccuracyMetric
 from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonitor
 from collie import CheckpointCallback
+from collie import ColliePadder, GPTLMLoss
 
-# from collie import LlamaForCausalLM
 from models.collie_llama_with_pe import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
+from utils.clm_tools_acc import EvaluatorForExtrapolation
 from utils.clm_tools_arxiv import get_arxiv_for_perplexity
 
 tag, group, pe_config, model_args, train_args = arg_parse()
@@ -28,10 +29,11 @@ config.model_config.hidden_size = model_args['hidden_size']
 config.model_config.intermediate_size = model_args['intermediate_size']
 config.model_config.num_attention_heads = model_args['num_attention_heads']
 config.model_config.num_hidden_layers = model_args['num_hidden_layers']
+config.model_config.use_cache = False
 tokenizer = model_args['tokenizer']
 
 config.init_method = lambda x: torch.nn.init.normal_(x, mean=0., std=0.002) if x.ndim == 2 else torch.nn.init.ones_(x)
-config.seed = 1024
+config.seed = 42
 
 config.train_micro_batch_size = train_args['train_micro_batch_size']
 config.eval_batch_size = train_args['eval_batch_size']
@@ -41,8 +43,8 @@ config.eval_per_n_steps = train_args['eval_per_n_steps']
 
 config.use_flash = True
 config.ds_config = {
-    'fp16': {'enabled': True},
-    'gradient_clipping': train_args['max_grad_value'],  
+    'bf16': {'enabled': True},
+    'gradient_clipping': train_args['gradient_clipping'],  
     
     'monitor_config': {
         'enabled': True,
@@ -54,14 +56,13 @@ config.ds_config = {
             'group': group  # group是run的集合，对应一张图表，不同monitor不同的子图
         }
     },
-    'csv_monitor': {
-        'enabled': True, 
-        'output_path': 'csv_logs',
-        'job_name': '{}-{}'.format(group, tag),
-    }
 }
 
 config.__setattr__('pe_config', pe_config)
+
+file_name = './csv_logs/{}-{}.txt'.format(group, tag)
+    
+config.__setattr__('file_name', file_name)
 
 model = LlamaForCausalLM.from_config(config=config)
 
@@ -90,10 +91,13 @@ if train_args['lr_scheduler_type'] == 'linear':
 else:
     lr_scheduler = None
 
-evaluators = [EvaluatorForPerplexity(model=model, config=config, dataset=test_datasets[item],
-                                     monitors=[EvalMonitor(config) ],
-                                     metrics={'ppl#{}'.format(item): PPLMetric(gather_result=True)}
-                                     ) for item in test_datasets]
+evaluators = []
+
+for item in test_datasets:
+    evaluators.append(EvaluatorForExtrapolation(model=model, dataset=test_datasets[item], 
+                                                config=config, monitors=[EvalMonitor(config) ], 
+                                                metrics={'{}'.format(item): AccuracyMetric(gather_result=True), 
+                                                         '{}#ppl'.format(item): PPLMetric(gather_result=True)}))
 
 model_size = sum([param.nelement() for param in model.parameters()]) / 1e6
 
@@ -107,6 +111,9 @@ if rank == 0:
 
 trainer = Trainer(model=model, tokenizer=tokenizer, config=config,
                   optimizer=optimizer, lr_scheduler=lr_scheduler,
+                  loss_fn=GPTLMLoss(ignore_index=0),
+                  train_dataset_collate_fn=ColliePadder(padding_token_id={"attention_mask": 0, "labels": 0}, padding_left=False),
+                  eval_dataset_collate_fn=ColliePadder(padding_token_id={"attention_mask": 0, "labels": 0}, padding_left=False),
                   train_dataset=train_dataset, evaluators=evaluators, 
                   monitors=[LossMonitor(config), LRMonitor(config), 
                             TGSMonitor(config), MemoryMonitor(config), ], 
@@ -114,4 +121,16 @@ trainer = Trainer(model=model, tokenizer=tokenizer, config=config,
                                                 every_n_epochs=train_args['save_every_n_epochs'])]
                   )
 
+if env.local_rank == 0:
+    file = open(file_name, 'a')
+    file.write(str(datetime.now()) + '\n\n')
+    file.write("'{}': {}\n".format(tag, '{'))
+    file.close()
+
 trainer.train()
+
+if env.local_rank == 0:
+    file = open(file_name, 'a')
+    file.write('}\n\n')
+    file.close()
+

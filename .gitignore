@@ -7,5 +7,7 @@ caches/
 wandb/
 csv_logs/
 
+scripts/
+
 nohup_logs/
 nohup.out

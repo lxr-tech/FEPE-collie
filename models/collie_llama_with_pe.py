@@ -4,6 +4,8 @@ import os
 import gc
 import json
 
+import numpy as np
+
 import torch
 from torch import nn
 import torch.utils.checkpoint
@@ -61,28 +63,32 @@ class RotaryPositionEmbedding(nn.Module):
             order, beta = 3,  1 / math.log(10000.0)  # 0.10861
             start, end = math.pow(0.0005, 1 / order), math.pow(0.9999, 1 / order)  # 
             if self.pe_config['1d']:
-                omega = torch.pow(torch.linspace(start, end, head_dim), order).reshape((1, -1)) * beta * 2
+                omega = np.power(np.linspace(start, end, head_dim), order) * beta * 2
             else:
-                omega = torch.pow(torch.linspace(start, end, head_dim // 2), order).reshape((1, -1)) * beta * 2
-                omega = torch.cat([omega, omega], dim=-1)
-            expos = (beta / omega) / (1/order * torch.pow(omega, 1/order - 1) * math.pow(2 * beta, -1/order))
+                omega = np.power(np.linspace(start, end, head_dim // 2), order) * beta * 2
+                omega = np.concatenate([omega, omega], axis=-1)
+            omega = omega[None, None, None, :]
+            expos = (beta / omega) / (1/order * np.power(omega, 1/order - 1) * np.power(2 * beta, -1/order))
         else:
             if self.pe_config['1d']:
-                omega = 1.0 / (10000.0 ** (torch.arange(0, head_dim, 1).float() / head_dim)).reshape((1, -1))
+                omega = 1.0 / (10000.0 ** (np.arange(0, head_dim, 1) / head_dim))
             else:
-                omega = 1.0 / (10000.0 ** (torch.arange(0, head_dim, 2).float() / head_dim)).reshape((1, -1))
-                omega = torch.cat([omega, omega], dim=-1)
-            expos = torch.ones_like(omega)
-        self.register_buffer("omega", omega, persistent=False)
-        self.register_buffer("expos", torch.sqrt(expos), persistent=False)
+                omega = 1.0 / (10000.0 ** (np.arange(0, head_dim, 2) / head_dim))
+                omega = np.concatenate([omega, omega], axis=-1)
+            omega = omega[None, None, None, :]
+            expos = np.ones_like(omega)
+        self.register_buffer("omega", torch.tensor(omega), persistent=False)
+        self.register_buffer("expos", torch.tensor(np.sqrt(expos)), persistent=False)
 
         if self.pe_config['exp']:
             if self.pe_config['imp']:
-                scale = - torch.log(omega) / math.log(10000.0) * head_dim
+                scale = - np.log(omega) / np.log(10000.0) * head_dim
             else:
-                scale = torch.arange(0, head_dim, 1 if self.pe_config['1d'] else 2).float()
-                scale = scale if self.pe_config['1d'] else torch.cat([scale, scale], dim=-1)
-            self.register_buffer("scale", ((scale + 0.4 * head_dim) / (1.4 * head_dim)), persistent=False)
+                scale = np.arange(0, head_dim, 1 if self.pe_config['1d'] else 2)
+                scale = scale if self.pe_config['1d'] else np.concatenate([scale, scale], axis=-1)
+                scale = scale[None, None, None, :]
+            scale = (scale + 0.4 * head_dim) / (1.4 * head_dim)
+            self.register_buffer("scale", torch.tensor(scale), persistent=False)
 
         # inv_freq = 1.0 / (10000.0 ** (
         #     torch.arange(0, head_dim, 2)[: (head_dim // 2)].float() / head_dim))
@@ -97,12 +103,11 @@ class RotaryPositionEmbedding(nn.Module):
         
         # batch_size, seq_len, n_head (fixed for tp), head_dim 
         
-        t = torch.arange(start_pos, start_pos + seq_len, 
-                         device=query.device, dtype=self.omega.dtype).reshape(-1, 1)
-        theta = self.omega[None, :, None, :] * t[None, :, None, :]
-        sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos[None, :, None, :]
+        t = torch.arange(seq_len, device=query.device).reshape(1, -1, 1, 1).float()
+        theta = self.omega.float() * t
+        sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos
 
-        q, k = query * expos, key * expos
+        q, k = query.float() * expos, key.float() * expos
 
         if self.pe_config['1d']:
             q_real = torch.cat([q * cos, q * sin], dim=-1)
@@ -112,16 +117,15 @@ class RotaryPositionEmbedding(nn.Module):
             q_real = q * cos + rotate_half(q) * sin
             k_real = k * cos + rotate_half(k) * sin
             # q_imag = q * sin - rotate_half(q) * cos
-
+            
         if self.pe_config['exp']:
-            scale = self.rotary_emb.scale ** ((t - start_pos - seq_len // 2) / 512)
+            scale = self.scale ** ((t - seq_len // 2) / self.pe_config['exp_base'])
             scale = scale if not self.pe_config['1d'] else torch.cat([scale, scale], dim=-1)
-            q_real = q_real * scale[None, :, None, :]
-            k_real = k_real / scale[None, :, None, :]
+            q_real = q_real * scale
+            k_real = k_real / scale
 
         if self.pe_config['log']:
-            base = math.log(self.pe_config['base']) if 'base' in self.pe_config else 1
-            q_real = q_real * torch.log(t+1)[None, :, None, :] / base
+            q_real = q_real * torch.log(t+1) / math.log(self.pe_config['log_base'])
 
         # query = torch.view_as_complex(
         #     query.float().reshape(*query.shape[:-1], -1, 2))
@@ -254,11 +258,22 @@ class LlamaLayer(nn.Module):
         query, key, value = rearrange(query, "b n (h d) -> b n h d", d=self.head_dim), \
             rearrange(key, "b n (h d) -> b n h d", d=self.head_dim), \
             rearrange(value, "b n (h d) -> b n h d", d=self.head_dim)
+        
+        # if env.local_rank == 0:
+        #     import pdb; pdb.set_trace()
+        # else:
+        #     while True:
+        #         pass
+        
         if self.past_key_values is not None:
             start_pos = self.past_key_values.shape[3]
         else:
             start_pos = 0
         query, key = self.self_attn["rotary_emb"](query, key, seq_len, start_pos)
+        
+        if self.config.pe_config['1d']:
+            value = torch.cat([value, torch.zeros_like(value, device=value.device, dtype=value.dtype)], dim=-1)
+        
         if self.past_key_values is not None:
             query = torch.cat([self.past_key_values[0].permute([0, 2, 1, 3]), query], dim=1)
             key = torch.cat([self.past_key_values[0].permute([0, 2, 1, 3]), key], dim=1)
@@ -272,9 +287,14 @@ class LlamaLayer(nn.Module):
         if self.config.use_flash:
             assert FlashAttention is not None, \
                 "Detected flash_attn is not installed. See https://github.com/HazyResearch/flash-attention"
-            qkv = torch.stack([query, key, value], dim=2)
-            output = FlashAttention()(qkv, key_padding_mask=attention_mask.bool(), causal=True)
             
+            qkv = torch.stack([query, key, value], dim=2)
+                            
+            output = FlashAttention(softmax_scale=1 / math.sqrt(self.head_dim), attention_dropout=0.)(qkv, key_padding_mask=attention_mask.bool(), causal=True)
+            
+            if self.config.pe_config['1d']:
+                output = output[..., :self.head_dim]
+
             """ flash_attn_2 note: 
                 from flash_attn.modules.mha import SelfAttention as FlashAttention
                 require attention_mask as a bool tensor
@@ -696,8 +716,6 @@ class LlamaForCausalLM(CollieModelForCausalLM):
 
                                 if need_split:
                                     state_dict[key] = concat_tensor(tensor_list, dim=0)
-                                    if key.endswith("q_proj.weight")  or key.endswith("k_proj.weight"):
-                                        state_dict[key] = reshape_wq_wk(state_dict[key])
                                     if process_exclusion:
                                         # CPU 内存回收（速度很慢）
                                         gc.collect()
@@ -708,8 +726,10 @@ class LlamaForCausalLM(CollieModelForCausalLM):
                                         if process_exclusion:
                                             # CPU 内存回收（速度很慢）
                                             gc.collect()
-                            if not key.startswith("lm_head.weight"):
-                                state_dict[f"model.{key}"] = state_dict.pop(key)
+                        if key.endswith("q_proj.weight")  or key.endswith("k_proj.weight"):
+                            state_dict[key] = reshape_wq_wk(state_dict[key])
+                        if not key.startswith("lm_head.weight"):
+                            state_dict[f"model.{key}"] = state_dict.pop(key)
                     if env.tp_rank == 0:
                         # Save gathered weights
                         if env.is_pipeline:
