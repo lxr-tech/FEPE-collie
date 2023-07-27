@@ -66,16 +66,16 @@ config.ds_config = {
             'group': group  # group是run的集合，对应一张图表，不同monitor不同的子图
         }
     },
-    # 'optimizer': {
-    #     'type': train_args['optim'],
-    #     'params': {
-    #         'lr': train_args['learning_rate'],
-    #         'betas': [0.9, 0.999],
-    #         'eps': 1e-8,
-    #         'weight_decay': train_args['weight_decay']
-    #     }
-    # }, 
-    # 'gradient_clipping': train_args['max_grad_norm'], 
+    'optimizer': {
+        'type': train_args['optim'],
+        'params': {
+            'lr': train_args['learning_rate'],
+            'betas': [0.9, 0.999],
+            'eps': 1e-8,
+            'weight_decay': train_args['weight_decay']
+        }
+    }, 
+    'gradient_clipping': train_args['max_grad_norm'], 
     'scheduler': {
         'type': 'WarmupLR',
         'params': {
@@ -95,10 +95,10 @@ config.__setattr__('file_name', file_name)
 
 model = LlamaForCausalLM.from_config(config=config)
 
-from utils.adamw import AdamW
+# from utils.adamw import AdamW
 
-optimizer = AdamW(model.parameters(), lr=train_args['learning_rate'], 
-                  weight_decay=train_args['weight_decay'], max_grad_norm=train_args['max_grad_norm'])
+# optimizer = AdamW(model.parameters(), lr=train_args['learning_rate'], 
+#                   weight_decay=train_args['weight_decay'], max_grad_norm=train_args['max_grad_norm'])
 
 # if train_args['lr_scheduler_type'] == 'linear':
 #     lr_scheduler = get_linear_schedule_with_warmup(optimizer=optimizer, 

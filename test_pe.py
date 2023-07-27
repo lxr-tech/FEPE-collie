@@ -61,7 +61,7 @@ pe_config['both'] = False
 
 ## old run loaded in collie version (from_config)
 import torch
-from models.collie_llama_with_pe import LlamaForCausalLM
+from models.flash_llama_with_pe import LlamaForCausalLM
 state_dict1 = torch.load('/remote-home/xrliu/projects/FEPE-deepspeed/checkpoints/init_pre_{}/train_last/pytorch_model.bin'.format(tag)) 
 state_dict2 = {}
 
@@ -99,7 +99,7 @@ if rank == 0:
 
 evaluators = []
 
-for item in [test_datasets]:  # ['512', '1024', '2048', '4096']:  
+for item in test_datasets:  # ['512', '1024', '2048', '4096']:  
     evaluators.append(EvaluatorForExtrapolation(model=model, dataset=test_datasets[item], 
                                                 config=config, monitors=[EvalMonitor(config) ], 
                                                 metrics={'{}'.format(item): AccuracyMetric(gather_result=True), 

@@ -352,8 +352,7 @@ class LlamaForCausalLM(CollieModelForCausalLM):
         index_ids = torch.arange(seqlen, device='cuda').reshape((1, -1)) * attention_mask
         index_ids = torch.gather(index_ids.flatten(), 0, indices).reshape(-1,)
 
-        inputs = {"input_ids": input_ids, "index_ids": index_ids, "cu_seqlens": cu_seqlens}
-        inputs["hidden_states"] = self.embed_tokens(inputs["input_ids"])
+        inputs = {"hidden_states": self.embed_tokens(input_ids), "index_ids": index_ids, "cu_seqlens": cu_seqlens}
         
         all_hidden_states = ()
         for layer in self.layers:
