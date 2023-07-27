@@ -23,8 +23,8 @@ model_args = {
 train_args = {
     ('330M', 512): {
         'max_length': 512, 'train_micro_batch_size': 48, 'eval_batch_size': 1, 
-        'train_epochs': 1, 'optim': 'adamw', 'learning_rate': 0.00015, 'weight_decay': 0.01, 
-        'lr_scheduler_type': 'linear', 'warmup_ratio': 1, 'gradient_clipping': 1.0,
+        'train_epochs': 1, 'optim': 'AdamW', 'learning_rate': 0.00015, 'weight_decay': 0.01, 
+        'lr_scheduler_type': 'linear', 'warmup_ratio': 1, 'max_grad_norm': 5.0,
         'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 1,
 
         # 'per_device_train_batch_size': 12, 'per_device_eval_batch_size': 12, 'num_train_epochs': 10,  # 4 cards

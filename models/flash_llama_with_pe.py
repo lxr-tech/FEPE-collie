@@ -23,7 +23,7 @@ from einops import rearrange
 
 try:
     from flash_attn.modules.mha import FlashSelfAttention as FlashAttention
-    from flash_attn.bert_padding import unpad_input
+    from flash_attn.bert_padding import index_first_axis, unpad_input, pad_input
 except ModuleNotFoundError:
     FlashAttention = None
 
@@ -68,7 +68,7 @@ class RotaryPositionEmbedding(nn.Module):
             else:
                 omega = np.power(np.linspace(start, end, head_dim // 2), order) * beta * 2
                 omega = np.concatenate([omega, omega], axis=-1)
-            omega = omega[None, None, None, :]
+            omega = omega[None, None, :]
             expos = (beta / omega) / (1/order * np.power(omega, 1/order - 1) * np.power(2 * beta, -1/order))
         else:
             if self.pe_config['1d']:
@@ -76,7 +76,7 @@ class RotaryPositionEmbedding(nn.Module):
             else:
                 omega = 1.0 / (10000.0 ** (np.arange(0, head_dim, 2) / head_dim))
                 omega = np.concatenate([omega, omega], axis=-1)
-            omega = omega[None, None, None, :]
+            omega = omega[None, None, :]
             expos = np.ones_like(omega)
         self.register_buffer("omega", torch.tensor(omega), persistent=False)
         self.register_buffer("expos", torch.tensor(np.sqrt(expos)), persistent=False)
@@ -87,7 +87,7 @@ class RotaryPositionEmbedding(nn.Module):
             else:
                 scale = np.arange(0, head_dim, 1 if self.pe_config['1d'] else 2)
                 scale = scale if self.pe_config['1d'] else np.concatenate([scale, scale], axis=-1)
-                scale = scale[None, None, None, :]
+                scale = scale[None, None, :]
             scale = (scale + 0.4 * head_dim) / (1.4 * head_dim)
             self.register_buffer("scale", torch.tensor(scale), persistent=False)
 
@@ -98,13 +98,14 @@ class RotaryPositionEmbedding(nn.Module):
     def forward(self,
                 query: torch.Tensor,
                 key: torch.Tensor,
-                seq_len: int,
-                start_pos: int = 0):
+                index_ids):
         dtype = query.dtype
         
         # batch_size, seq_len, n_head (fixed for tp), head_dim 
         
-        t = torch.arange(seq_len, device=query.device).reshape(1, -1, 1, 1).float()
+        t = index_ids.reshape(-1, 1, 1).float()
+        seq_len = index_ids.max()
+        
         theta = self.omega.float() * t
         sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos
 
@@ -243,22 +244,23 @@ class LlamaLayer(nn.Module):
         self.use_cache = self.config.model_config.use_cache
         self.past_key_values = None
         self.hidden_states = None
+        
+        self.flash_attn = FlashAttention(softmax_scale=1 / math.sqrt(self.head_dim), attention_dropout=0.)
 
     def _forward(self, 
-                 hidden_states: torch.Tensor,
-                 attention_mask: Optional[torch.Tensor] = None, **kwargs):
+                 hidden_states: torch.Tensor, index_ids, cu_seqlens):
         if not self.training:
             self.hidden_states = hidden_states
         else:
             self.hidden_states = None
-        assert hidden_states.ndim == 3, f"hidden_states.shape must be (B, N, H), but got {hidden_states.shape}"
-        batch_size, seq_len, _ = hidden_states.shape
+        assert hidden_states.ndim == 2, f"hidden_states.shape must be (T, H), but got {hidden_states.shape}"
+
         _hidden_states = self.input_layernorm(hidden_states)
         query, key, value = self.self_attn["q_proj"](_hidden_states), self.self_attn["k_proj"](
             _hidden_states), self.self_attn["v_proj"](_hidden_states)
-        query, key, value = rearrange(query, "b n (h d) -> b n h d", d=self.head_dim), \
-            rearrange(key, "b n (h d) -> b n h d", d=self.head_dim), \
-            rearrange(value, "b n (h d) -> b n h d", d=self.head_dim)
+        query, key, value = rearrange(query, "t (h d) -> t h d", d=self.head_dim), \
+            rearrange(key, "t (h d) -> t h d", d=self.head_dim), \
+            rearrange(value, "t (h d) -> t h d", d=self.head_dim)
         
         # if env.local_rank == 0:
         #     import pdb; pdb.set_trace()
@@ -266,67 +268,26 @@ class LlamaLayer(nn.Module):
         #     while True:
         #         pass
         
-        if self.past_key_values is not None:
-            start_pos = self.past_key_values.shape[3]
-        else:
-            start_pos = 0
-        query, key = self.self_attn["rotary_emb"](query, key, seq_len, start_pos)
+        query, key = self.self_attn["rotary_emb"](query, key, index_ids)
         
         if self.config.pe_config['1d']:
             value = torch.cat([value, torch.zeros_like(value, device=value.device, dtype=value.dtype)], dim=-1)
-        
-        if self.past_key_values is not None:
-            query = torch.cat([self.past_key_values[0].permute([0, 2, 1, 3]), query], dim=1)
-            key = torch.cat([self.past_key_values[0].permute([0, 2, 1, 3]), key], dim=1)
-            value = torch.cat([self.past_key_values[1].permute([0, 2, 1, 3]), value], dim=1)
-        if self.use_cache and not self.training:
-            self.past_key_values = torch.stack((key.permute([0, 2, 1, 3]), value.permute([0, 2, 1, 3])), dim=0)
+
         key = torch.repeat_interleave(key, dim=1, repeats=self.num_key_value_groups)
         value = torch.repeat_interleave(value, dim=1, repeats=self.num_key_value_groups)
-        attention_mask = attention_mask if attention_mask is not None else torch.ones((query.shape[0], query.shape[1])).to(hidden_states.device)
         
-        if self.config.use_flash:
-            assert FlashAttention is not None, \
-                "Detected flash_attn is not installed. See https://github.com/HazyResearch/flash-attention"
-            
-            qkv = torch.stack([query, key, value], dim=2)
-            qkv_unpad, indices, cu_seqlens, max_seqlen = unpad_input(qkv, attention_mask.bool())
-            output = FlashAttention(softmax_scale=1 / math.sqrt(self.head_dim), attention_dropout=0.)(qkv_unpad, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen, causal=True)
-            
-            if self.config.pe_config['1d']:
-                output = output[..., :self.head_dim]
+        assert FlashAttention is not None, \
+            "Detected flash_attn is not installed. See https://github.com/HazyResearch/flash-attention"
+        
+        qkv = torch.stack([query, key, value], dim=1)
+        output = self.flash_attn(qkv, cu_seqlens=cu_seqlens, max_seqlen=int(index_ids.max()), causal=True)
+        
+        if self.config.pe_config['1d']:
+            output = output[..., :self.head_dim]
+        
+        output = rearrange(output, "t h d -> t (h d)")
 
-            """ flash_attn_2 note: 
-                from flash_attn.modules.mha import SelfAttention as FlashAttention
-                require attention_mask as a bool tensor
-                replace 'output, _ =' as 'output =' 
-            """
-            
-            output = rearrange(output, "b n h d -> b n (h d)")
-        else:
-            query, key, value = query.permute(0, 2, 1, 3), key.permute(
-                0, 2, 1, 3), value.permute(0, 2, 1, 3)
-            attention_score = torch.matmul(query, key.transpose(
-                2, 3)) / math.sqrt(self.head_dim)
-            if seq_len + start_pos > 1:
-                mask = torch.full((1, 1, seq_len + start_pos, seq_len + start_pos), float("-inf"))
-                mask = torch.triu(mask, diagonal=1).to(
-                    attention_score.device)
-                attention_score = attention_score + mask
-            key_padding_mask = (1.0 - attention_mask.unsqueeze(1).unsqueeze(2)) * torch.finfo(
-                attention_score.dtype).min
-            attention_score = F.softmax(
-                attention_score + key_padding_mask, dim=-1).type_as(value)
-            output = torch.matmul(attention_score, value)
-            
-            if self.config.pe_config['1d']:
-                output = output[..., :self.head_dim]
-            
-            output = output.transpose(1, 2).contiguous().view(
-                batch_size, seq_len + start_pos, -1)
-        output = F.dropout(output, p=self.config.dropout,
-                            training=self.training)
-        output = output[:, start_pos:, :]
+        output = F.dropout(output, p=self.config.dropout, training=self.training)
         hidden_states = hidden_states + self.self_attn["o_proj"](output)
         _hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = hidden_states + F.dropout(self.mlp["down_proj"](F.silu(self.mlp["gate_proj"](
@@ -338,7 +299,8 @@ class LlamaLayer(nn.Module):
             inputs["hidden_states"] = torch.utils.checkpoint.checkpoint(
                 self._forward,
                 inputs["hidden_states"],
-                inputs.get("attention_mask", None)
+                inputs["index_ids"],
+                inputs["cu_seqlens"]
             )
         else:
             inputs["hidden_states"] = self._forward(**inputs)
@@ -375,21 +337,31 @@ class LlamaForCausalLM(CollieModelForCausalLM):
                 attention_mask: Optional[torch.Tensor] = None, 
                 past_key_values: Optional[Tuple[torch.Tensor]] = None,
                 **kwargs):
-        inputs = {"input_ids": input_ids}
-        if attention_mask is not None:
-            inputs["attention_mask"] = attention_mask
-        if input_ids == None:
-            inputs["hidden_states"] = kwargs['inputs_embeds']
-        else:
-            inputs["hidden_states"] = self.embed_tokens(inputs["input_ids"])
-        if past_key_values is not None:
-            self._set_past_key_values(self.layers, past_key_values)
-        else:
-            self._clean_past_key_values(self.layers)
+        
+        assert input_ids.ndim == 2
+        batch, seqlen = input_ids.shape
+        
+        seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
+        indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
+        cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0))
+
+        input_ids = torch.gather(input_ids.flatten(), 0, indices).reshape(-1,)
+        
+        # input_ids, indices, cu_seqlens, max_seqlen_in_batch = unpad_input(input_ids, attention_mask.bool())
+        
+        index_ids = torch.arange(seqlen, device='cuda').reshape((1, -1)) * attention_mask
+        index_ids = torch.gather(index_ids.flatten(), 0, indices).reshape(-1,)
+
+        inputs = {"input_ids": input_ids, "index_ids": index_ids, "cu_seqlens": cu_seqlens}
+        inputs["hidden_states"] = self.embed_tokens(inputs["input_ids"])
+        
         all_hidden_states = ()
         for layer in self.layers:
             all_hidden_states += (inputs["hidden_states"],)
             inputs.update(layer(inputs))
+            
+        inputs["hidden_states"] = pad_input(inputs["hidden_states"], indices, batch, seqlen)
+        
         inputs["hidden_states"] = self.norm(inputs["hidden_states"])
         all_hidden_states += (inputs["hidden_states"], )
         inputs["logits"] = self.lm_head(inputs["hidden_states"])

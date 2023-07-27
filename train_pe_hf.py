@@ -7,13 +7,13 @@ from datetime import datetime
 
 from transformers import get_linear_schedule_with_warmup
 
-from collie import CollieConfig, Trainer, env
+from collie import CollieConfig, Trainer, env, setup_distribution
 from collie import EvaluatorForPerplexity, PPLMetric, AccuracyMetric
 from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonitor
 from collie import CheckpointCallback
 from collie import ColliePadder, GPTLMLoss
 
-from models.flash_llama_with_pe import LlamaForCausalLM
+from models.hf_ds_llama_with_pe import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation
@@ -66,16 +66,16 @@ config.ds_config = {
             'group': group  # group是run的集合，对应一张图表，不同monitor不同的子图
         }
     },
-    # 'optimizer': {
-    #     'type': train_args['optim'],
-    #     'params': {
-    #         'lr': train_args['learning_rate'],
-    #         'betas': [0.9, 0.999],
-    #         'eps': 1e-8,
-    #         'weight_decay': train_args['weight_decay']
-    #     }
-    # }, 
-    # 'gradient_clipping': train_args['max_grad_norm'], 
+    'optimizer': {
+        'type': train_args['optim'],  # 'FusedLamb',  
+        'params': {
+            'lr': train_args['learning_rate'],
+            'betas': [0.9, 0.999],
+            'eps': 1e-8,
+            'weight_decay': train_args['weight_decay']
+        }
+    }, 
+    'gradient_clipping': train_args['max_grad_norm'], 
     'scheduler': {
         'type': 'WarmupLR',
         'params': {
@@ -93,19 +93,9 @@ file_name = './csv_logs/{}-{}.txt'.format(group, tag)
     
 config.__setattr__('file_name', file_name)
 
-model = LlamaForCausalLM.from_config(config=config)
+model = LlamaForCausalLM(config=config.model_config, pe_config=pe_config)
 
-from utils.adamw import AdamW
-
-optimizer = AdamW(model.parameters(), lr=train_args['learning_rate'], 
-                  weight_decay=train_args['weight_decay'], max_grad_norm=train_args['max_grad_norm'])
-
-# if train_args['lr_scheduler_type'] == 'linear':
-#     lr_scheduler = get_linear_schedule_with_warmup(optimizer=optimizer, 
-#                                                    num_training_steps=num_training_steps,
-#                                                    num_warmup_steps=num_warmup_steps)
-# else:
-#     lr_scheduler = None
+setup_distribution(config)
 
 evaluators = []
 
