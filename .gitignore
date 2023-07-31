@@ -6,6 +6,7 @@ caches/
 
 wandb/
 csv_logs/
+test_model/
 
 nohup_logs/
 nohup.out

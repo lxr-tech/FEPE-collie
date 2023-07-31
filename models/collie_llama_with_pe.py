@@ -106,7 +106,7 @@ class RotaryPositionEmbedding(nn.Module):
         
         t = torch.arange(seq_len, device=query.device).reshape(1, -1, 1, 1).float()
         theta = self.omega.float() * t
-        sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos
+        sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos.float()
 
         q, k = query.float() * expos, key.float() * expos
 
@@ -260,12 +260,6 @@ class LlamaLayer(nn.Module):
             rearrange(key, "b n (h d) -> b n h d", d=self.head_dim), \
             rearrange(value, "b n (h d) -> b n h d", d=self.head_dim)
         
-        # if env.local_rank == 0:
-        #     import pdb; pdb.set_trace()
-        # else:
-        #     while True:
-        #         pass
-        
         if self.past_key_values is not None:
             start_pos = self.past_key_values.shape[3]
         else:
@@ -316,7 +310,7 @@ class LlamaLayer(nn.Module):
             key_padding_mask = (1.0 - attention_mask.unsqueeze(1).unsqueeze(2)) * torch.finfo(
                 attention_score.dtype).min
             attention_score = F.softmax(
-                attention_score + key_padding_mask, dim=-1).type_as(value)
+                attention_score + key_padding_mask, dtype=torch.float32, dim=-1).type_as(value)
             output = torch.matmul(attention_score, value)
             
             if self.config.pe_config['1d']:
@@ -387,7 +381,7 @@ class LlamaForCausalLM(CollieModelForCausalLM):
         else:
             self._clean_past_key_values(self.layers)
         all_hidden_states = ()
-        for layer in self.layers:
+        for idx, layer in enumerate(self.layers):
             all_hidden_states += (inputs["hidden_states"],)
             inputs.update(layer(inputs))
         inputs["hidden_states"] = self.norm(inputs["hidden_states"])

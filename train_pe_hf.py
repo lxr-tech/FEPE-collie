@@ -24,7 +24,7 @@ tag, group, pe_config, model_args, train_args = arg_parse()
 rank = env.local_rank  #  int(os.environ["LOCAL_RANK"])
 size = env.world_size  #  int(os.environ["WORLD_SIZE"])
 
-config = CollieConfig.from_pretrained('/remote-home/share/llama_hf/7B')
+config = CollieConfig.from_pretrained('decapoda-research/llama-7b-hf')
 config.model_config.hidden_size = model_args['hidden_size']
 config.model_config.intermediate_size = model_args['intermediate_size']
 config.model_config.num_attention_heads = model_args['num_attention_heads']
@@ -35,7 +35,11 @@ tokenizer = model_args['tokenizer']
 config.init_method = lambda x: torch.nn.init.normal_(x, mean=0., std=0.002) if x.ndim == 2 else torch.nn.init.ones_(x)
 config.seed = 42
 
-config.train_micro_batch_size = train_args['train_micro_batch_size'] // size
+torch.manual_seed(config.seed)
+torch.cuda.manual_seed_all(config.seed)
+torch.backends.cudnn.deterministic = True
+
+config.train_micro_batch_size = train_args['train_micro_batch_size']
 config.eval_batch_size = train_args['eval_batch_size']
 config.train_epochs = train_args['train_epochs']
 config.eval_per_n_epochs = train_args['eval_per_n_epochs']
@@ -56,35 +60,35 @@ num_warmup_steps = int(num_training_steps * train_args['warmup_ratio'])
 config.use_flash = False
 config.ds_config = {
     'bf16': {'enabled': True},
-    'monitor_config': {
-        'enabled': True,
-        'tag': tag,  # tag 表示 一次run的名字，对应图表中 一条线
-        'wandb': {
-            'enabled': True,
-            'team': 'xrliu',
-            'project': 'fepe_collie',
-            'group': group  # group是run的集合，对应一张图表，不同monitor不同的子图
-        }
-    },
-    'optimizer': {
-        'type': train_args['optim'],  # 'FusedLamb',  
-        'params': {
-            'lr': train_args['learning_rate'],
-            'betas': [0.9, 0.999],
-            'eps': 1e-8,
-            'weight_decay': train_args['weight_decay']
-        }
-    }, 
+    # 'monitor_config': {
+    #     'enabled': True,
+    #     'tag': tag,  # tag 表示 一次run的名字，对应图表中 一条线
+    #     'wandb': {
+    #         'enabled': True,
+    #         'team': 'xrliu',
+    #         'project': 'fepe_collie',
+    #         'group': group  # group是run的集合，对应一张图表，不同monitor不同的子图
+    #     }
+    # },
+    # 'optimizer': {
+    #     'type': train_args['optim'],  # 'FusedLamb',  
+    #     'params': {
+    #         'lr': train_args['learning_rate'],
+    #         'betas': [0.9, 0.999],
+    #         'eps': 1e-8,
+    #         'weight_decay': train_args['weight_decay']
+    #     }s
+    # }, 
     'gradient_clipping': train_args['max_grad_norm'], 
-    'scheduler': {
-        'type': 'WarmupLR',
-        'params': {
-            'warmup_min_lr': 0,
-            'warmup_max_lr': train_args['learning_rate'],
-            'warmup_num_steps': num_warmup_steps,
-            'warmup_type': 'linear'
-        }
-    }
+    # 'scheduler': {
+    #     'type': 'WarmupLR',
+    #     'params': {
+    #         'warmup_min_lr': 0,
+    #         'warmup_max_lr': train_args['learning_rate'],
+    #         'warmup_num_steps': num_warmup_steps,
+    #         'warmup_type': 'linear'
+    #     }
+    # }
 }
 
 config.__setattr__('pe_config', pe_config)
@@ -96,6 +100,21 @@ config.__setattr__('file_name', file_name)
 model = LlamaForCausalLM(config=config.model_config, pe_config=pe_config)
 
 setup_distribution(config)
+
+from torch.optim import AdamW
+
+if train_args['optim'] == 'AdamW':
+    optimizer = AdamW(model.parameters(), lr=train_args['learning_rate'], 
+                      weight_decay=train_args['weight_decay'], )  # max_grad_norm=train_args['max_grad_norm'])
+else:
+    optimizer = None
+    
+if train_args['lr_scheduler_type'] == 'linear':
+    lr_scheduler = get_linear_schedule_with_warmup(optimizer=optimizer, 
+                                                   num_training_steps=num_training_steps,
+                                                   num_warmup_steps=num_warmup_steps)
+else:
+    lr_scheduler = None
 
 evaluators = []
 
@@ -116,7 +135,7 @@ if rank == 0:
     print(config, '\n')
 
 trainer = Trainer(model=model, tokenizer=tokenizer, config=config,
-                #   optimizer=optimizer, lr_scheduler=lr_scheduler,
+                  optimizer=optimizer, lr_scheduler=lr_scheduler,
                   loss_fn=GPTLMLoss(ignore_index=0),
                   train_dataset_collate_fn=ColliePadder(padding_token_id={"attention_mask": 0, "labels": 0}, padding_left=False),
                   eval_dataset_collate_fn=ColliePadder(padding_token_id={"attention_mask": 0, "labels": 0}, padding_left=False),

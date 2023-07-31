@@ -13,10 +13,11 @@ from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonito
 from collie import CheckpointCallback
 from collie import ColliePadder, GPTLMLoss
 
-from models.flash_llama_with_pe import LlamaForCausalLM
+from models.collie_llama_with_pe import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation
+from utils.clm_tools_arxiv import get_arxiv_for_perplexity
 
 tag, group, pe_config, model_args, train_args = arg_parse()
 
@@ -33,7 +34,6 @@ tokenizer = model_args['tokenizer']
 
 config.init_method = lambda x: torch.nn.init.normal_(x, mean=0., std=0.002) if x.ndim == 2 else torch.nn.init.ones_(x)
 config.seed = 42
-config.checkpointing = True
 
 torch.manual_seed(config.seed)
 torch.cuda.manual_seed_all(config.seed)
@@ -45,51 +45,32 @@ config.train_epochs = train_args['train_epochs']
 config.eval_per_n_epochs = train_args['eval_per_n_epochs']
 config.eval_per_n_steps = train_args['eval_per_n_steps']
 
-if model_args == '330M':
-    
-    from utils.clm_tools_arxiv import get_arxiv_for_perplexity
+train_length = train_args['max_length']
+test_lengths = [512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192, 9216, 10240, ]
+train_path = 'arxiv-train-{}-{}.pkl'.format(model_args['size'], train_args['max_length'])
+test_path = 'arxiv-test-{}-{}.pkl'.format(model_args['size'], test_lengths[-1])
 
-    train_length = train_args['max_length']
-    test_lengths = [512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192, 9216, 10240, ]
+tokenizer, train_dataset, test_datasets = get_arxiv_for_perplexity(tokenizer=tokenizer, 
+    train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
 
-    train_path = 'arxiv-train-{}-{}.pkl'.format(model_args['size'], train_args['max_length'])
-    test_path = 'arxiv-test-{}-{}.pkl'.format(model_args['size'], test_lengths[-1])
-
-    tokenizer, train_dataset, test_datasets = get_arxiv_for_perplexity(tokenizer=tokenizer, 
-        train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
-
-    num_training_batchs = math.floor(len(train_dataset) / config.train_micro_batch_size)
-    num_training_steps = math.floor(num_training_batchs / size) * train_args['train_epochs']
-    num_warmup_steps = int(num_training_steps * train_args['warmup_ratio'])
-
-else:
-    
-    from utils.clm_tools_pile import get_pile_for_perplexity
-
-    train_length = train_args['max_length']
-    test_lengths = [1024, 2048, 4096, 6144, 8192, 10240, 12288, 14336, 16384, 18432, 20480, ]
-
-    tokenizer, train_dataset, test_datasets = get_pile_for_perplexity(tokenizer=tokenizer, 
-        train_length=train_length, test_lengths=test_lengths)
-
-    num_training_steps = (32 * 1024 * 1024 * 1024) / train_args['max_length'] / (train_args['train_micro_batch_size'] * size)
-    num_warmup_steps = int(num_training_steps * train_args['warmup_ratio'])
-   
-    raise KeyError
+num_training_batchs = math.floor(len(train_dataset) / config.train_micro_batch_size)
+num_training_steps = math.floor(num_training_batchs / size) * train_args['train_epochs']
+num_warmup_steps = int(num_training_steps * train_args['warmup_ratio'])
 
 config.use_flash = False
+config.checkpointing = False
 config.ds_config = {
     'bf16': {'enabled': True},
-    'monitor_config': {
-        'enabled': True,
-        'tag': tag,  # tag 表示 一次run的名字，对应图表中 一条线
-        'wandb': {
-            'enabled': True,
-            'team': 'xrliu',
-            'project': 'fepe_collie',
-            'group': group  # group是run的集合，对应一张图表，不同monitor不同的子图
-        }
-    },
+    # 'monitor_config': {
+    #     'enabled': True,
+    #     'tag': tag,  # tag 表示 一次run的名字，对应图表中 一条线
+    #     'wandb': {
+    #         'enabled': True,
+    #         'team': 'xrliu',
+    #         'project': 'fepe_collie',
+    #         'group': group  # group是run的集合，对应一张图表，不同monitor不同的子图
+    #     }
+    # },
     # 'optimizer': {
     #     'type': train_args['optim'],
     #     'params': {
@@ -117,7 +98,19 @@ file_name = './csv_logs/{}-{}.txt'.format(group, tag)
     
 config.__setattr__('file_name', file_name)
 
+# model = LlamaForCausalLM.from_pretrained("./test_model", config=config)
+# model = LlamaForCausalLM.from_config(config=config)
+
+state_dict1 = torch.load('/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/test_model/pytorch_model.bin'.format(tag)) 
+state_dict2 = {}
+
+for key, value in state_dict1.items():
+    if key.startswith('model.'):
+        state_dict2[key[6:]] = value
+    else:
+        state_dict2[key] = value
 model = LlamaForCausalLM.from_config(config=config)
+model.load_state_dict(state_dict2)
 
 from torch.optim import AdamW
 # from utils.adamw import AdamW

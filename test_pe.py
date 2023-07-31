@@ -16,7 +16,7 @@ tag, group, pe_config, model_args, train_args = arg_parse()
 rank = env.local_rank  #  int(os.environ["LOCAL_RANK"])
 size = env.world_size  #  int(os.environ["WORLD_SIZE"])
 
-config = CollieConfig.from_pretrained('/remote-home/share/llama_hf/7B')
+config = CollieConfig.from_pretrained('decapoda-research/llama-7b-hf')
 config.model_config.hidden_size = model_args['hidden_size']
 config.model_config.intermediate_size = model_args['intermediate_size']
 config.model_config.num_attention_heads = model_args['num_attention_heads']

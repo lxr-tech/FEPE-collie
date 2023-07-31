@@ -23,13 +23,18 @@ lengths[-1][0] = seqlen
 attention_mask_bool = repeat(torch.arange(seqlen, device='cuda'), 's -> b s', b=batch_size) < lengths
 attention_mask = attention_mask_bool.int()
 
-# x_unpad, indices, cu_seqlens, max_seqlen_in_batch = unpad_input(x, attention_mask_bool)
+x_unpad, indices, cu_seqlens, max_seqlen_in_batch = unpad_input(x, attention_mask_bool)
+
+print("lengths", lengths)
+print("x_unpad", x_unpad)
+print("indices", indices)
+print("cu_seqlens", cu_seqlens)
+print("max_seqlen_in_batch", max_seqlen_in_batch)
 
 seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
 indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
 max_seqlen_in_batch = seqlens_in_batch.max().item()
 cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0))
-
 
 x_unpad = index_first_axis(rearrange(x, 'b s ... -> (b s) ...'), indices)
 

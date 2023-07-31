@@ -33,8 +33,8 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import add_start_docstrings, add_start_docstrings_to_model_forward, logging, replace_return_docstrings
 from transformers.models.llama.configuration_llama import LlamaConfig
 
-from flash_attn.modules.mha import FlashSelfAttention as FlashAttention
-from flash_attn.bert_padding import unpad_input
+# from flash_attn.modules.mha import FlashSelfAttention as FlashAttention
+# from flash_attn.bert_padding import unpad_input
 
 logger = logging.get_logger(__name__)
 
@@ -99,7 +99,7 @@ class LlamaRotaryEmbedding(torch.nn.Module):
         super().__init__()
         if pe_config['imp']:
             order, beta = 3,  1 / np.log(10000)  # 0.10861
-            start, end = np.power(0.0005, 1 / order), np.power(1.25, 1 / order)  # 0.9999
+            start, end = np.power(0.0005, 1 / order), np.power(0.9999, 1 / order)  # 
             if pe_config['1d']:
                 omega = torch.pow(torch.linspace(start, end, dim), order).reshape((1, -1)) * beta * 2
             else:
@@ -126,11 +126,11 @@ class LlamaRotaryEmbedding(torch.nn.Module):
 
     def forward(self, x, seq_len=None):
 
-        t = torch.arange(seq_len, device=x.device, dtype=self.omega.dtype)
-        theta = self.omega[None, :, None, :] * t[None, None, :, None]
+        t = torch.arange(seq_len, device=x.device, dtype=torch.float)
+        theta = self.omega.float()[None, :, None, :] * t[None, None, :, None]
         sin_pos, cos_pos = torch.sin(theta), torch.cos(theta)
 
-        return cos_pos, sin_pos, self.expos[None, :, None, :]
+        return cos_pos, sin_pos, self.expos.float()[None, :, None, :]
 
 
 def rotate_half(x):
@@ -181,16 +181,18 @@ class LlamaAttention(nn.Module):
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
         self.rotary_emb = LlamaRotaryEmbedding(dim=self.head_dim, pe_config=pe_config)
         # if pe_config['flash_train'] or pe_config['flash_test']:
-        self.flash_attn = FlashAttention(softmax_scale=1 / math.sqrt(self.head_dim), attention_dropout=0.)
+        # self.flash_attn = FlashAttention(softmax_scale=1 / math.sqrt(self.head_dim), attention_dropout=0.)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
     def apply_rotary_pos_emb(self, q, k, cos, sin, expos, q_len):
         # The first two dimensions of cos and sin are always 1, so we can `squeeze` them.
-        q, k = q * expos, k * expos
+        dtype = q.dtype
 
-        t = torch.arange(q_len, dtype=q.dtype, device=q.device).reshape(-1, 1)
+        q, k = q * expos.float(), k.float() * expos
+
+        t = torch.arange(q_len, device=q.device).reshape(-1, 1).float()
 
         if self.pe_config['1d']:
             q_real = torch.cat([q * cos, q * sin], dim=-1)
@@ -211,7 +213,7 @@ class LlamaAttention(nn.Module):
             base = math.log(self.pe_config['base']) if 'base' in self.pe_config else 1
             q_real = q_real * torch.log(t+1)[None, None, :, :] / base
 
-        return q_real, k_real  # , q_imag
+        return q_real.type(dtype), k_real.type(dtype)
 
     def forward(
         self,
@@ -223,16 +225,11 @@ class LlamaAttention(nn.Module):
         use_cache: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
-
+        
         query_states = self.q_proj(hidden_states).view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         key_states = self.k_proj(hidden_states).view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         value_states = self.v_proj(hidden_states).view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         
-        # if torch.distributed.get_rank() == 0:
-        #     import pdb; pdb.set_trace()
-        # else:
-        #     while True:
-        #         pass
 
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
@@ -529,7 +526,7 @@ class LlamaModel(LlamaPreTrainedModel): # nn.Module
         self.layers = nn.ModuleList([LlamaDecoderLayer(config, pe_config) for _ in range(config.num_hidden_layers)])
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-        self.gradient_checkpointing = True
+        self.gradient_checkpointing = False
         # Initialize weights and apply final processing
         # if pe_config['init']:
         self.post_init()
@@ -637,13 +634,13 @@ class LlamaModel(LlamaPreTrainedModel): # nn.Module
         all_hidden_states = () if output_hidden_states else None
         all_self_attns = () if output_attentions else None
         next_decoder_cache = () if use_cache else None
-
+        
         for idx, decoder_layer in enumerate(self.layers):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
             past_key_value = past_key_values[idx] if past_key_values is not None else None
-
+            
             if self.gradient_checkpointing and self.training:
 
                 def create_custom_forward(module):
@@ -660,6 +657,7 @@ class LlamaModel(LlamaPreTrainedModel): # nn.Module
                     position_ids,
                     None,
                 )
+                
             else:
                 layer_outputs = decoder_layer(
                     hidden_states,
@@ -677,7 +675,9 @@ class LlamaModel(LlamaPreTrainedModel): # nn.Module
 
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
-
+                
+        
+            
         hidden_states = self.norm(hidden_states)
 
         # add hidden states from the last decoder layer
@@ -764,7 +764,9 @@ class LlamaForCausalLM(LlamaPreTrainedModel):  # nn.Module
         >>> tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
         "Hey, are you consciours? Can you talk to me?\nI'm not consciours, but I can talk to you."
         ```"""
-
+        # import os
+        # if os.environ["RANK"] == "0":
+        #     self.save_pretrained("./test_model")
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states

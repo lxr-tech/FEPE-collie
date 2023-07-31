@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from torch.optim.adamw import adamw
 
-from apex import amp
+# from apex import amp
 
 
 class AdamW(Optimizer):
@@ -152,7 +152,7 @@ class AdamW(Optimizer):
             with torch.enable_grad():
                 loss = closure()
                 
-        # # torch.nn.utils.clip_grad_norm_(self.param_groups, max_norm=self.max_grad_norm)  # for fp32
+        torch.nn.utils.clip_grad_norm(self.param_groups, max_norm=self.max_grad_norm)  # for fp32
         
         # torch.nn.utils.clip_grad_norm_(amp.master_params(self), max_norm=self.max_grad_norm)  # for fp16 maybe bf16
 

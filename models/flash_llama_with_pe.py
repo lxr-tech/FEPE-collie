@@ -61,15 +61,15 @@ class RotaryPositionEmbedding(nn.Module):
         # batch_size, seq_len, n_head (fixed for tp), head_dim 
         
         if self.pe_config['imp']:
-            order, beta = 3,  1 / math.log(10000.0)  # 0.10861
-            start, end = math.pow(0.0005, 1 / order), math.pow(0.9999, 1 / order)  # 
+            order, beta = 3,  1 / math.log(10000.0)  # 0.10856
+            start, end = math.pow(0.0001, 1 / order), math.pow(0.9999, 1 / order)  # 
             if self.pe_config['1d']:
-                omega = np.power(np.linspace(start, end, head_dim), order) * beta * 2
+                omega = np.power(np.linspace(start, end, head_dim), order)  # * beta * 2
             else:
-                omega = np.power(np.linspace(start, end, head_dim // 2), order) * beta * 2
+                omega = np.power(np.linspace(start, end, head_dim // 2), order)   # * beta * 2
                 omega = np.concatenate([omega, omega], axis=-1)
             omega = omega[None, None, :]
-            expos = (beta / omega) / (1/order * np.power(omega, 1/order - 1) * np.power(2 * beta, -1/order))
+            expos = (beta / omega) / (1/order * np.power(omega, 1/order - 1))  # * np.power(2 * beta, -1/order))
         else:
             if self.pe_config['1d']:
                 omega = 1.0 / (10000.0 ** (np.arange(0, head_dim, 1) / head_dim))
@@ -107,7 +107,7 @@ class RotaryPositionEmbedding(nn.Module):
         seq_len = index_ids.max()
         
         theta = self.omega.float() * t
-        sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos
+        sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos.float()
 
         q, k = query.float() * expos, key.float() * expos
 
@@ -261,13 +261,6 @@ class LlamaLayer(nn.Module):
         query, key, value = rearrange(query, "t (h d) -> t h d", d=self.head_dim), \
             rearrange(key, "t (h d) -> t h d", d=self.head_dim), \
             rearrange(value, "t (h d) -> t h d", d=self.head_dim)
-        
-        # if env.local_rank == 0:
-        #     import pdb; pdb.set_trace()
-        # else:
-        #     while True:
-        #         pass
-        
         query, key = self.self_attn["rotary_emb"](query, key, index_ids)
         
         if self.config.pe_config['1d']:
@@ -313,7 +306,8 @@ class LlamaForCausalLM(CollieModelForCausalLM):
         super().__init__(config)
         self.embed_tokens = tensor_parallel.VocabParallelEmbedding(
             self.collie_config.vocab_size,
-            self.collie_config.hidden_size
+            self.collie_config.hidden_size,
+            perform_initialization=False
         )
         self.layers = nn.ModuleList(
             [LlamaLayer(self.collie_config) for _ in range(self.collie_config.num_hidden_layers)])
@@ -341,6 +335,9 @@ class LlamaForCausalLM(CollieModelForCausalLM):
         assert input_ids.ndim == 2
         batch, seqlen = input_ids.shape
         
+        if attention_mask is None:
+            attention_mask = (input_ids != 0).int()
+        
         seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
         indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
         cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0))
@@ -356,6 +353,7 @@ class LlamaForCausalLM(CollieModelForCausalLM):
         
         all_hidden_states = ()
         for layer in self.layers:
+            
             all_hidden_states += (inputs["hidden_states"],)
             inputs.update(layer(inputs))
             
