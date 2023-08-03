@@ -275,8 +275,9 @@ class LlamaLayer(nn.Module):
             value = torch.cat([self.past_key_values[1].permute([0, 2, 1, 3]), value], dim=1)
         if self.use_cache and not self.training:
             self.past_key_values = torch.stack((key.permute([0, 2, 1, 3]), value.permute([0, 2, 1, 3])), dim=0)
-        key = torch.repeat_interleave(key, dim=1, repeats=self.num_key_value_groups)
-        value = torch.repeat_interleave(value, dim=1, repeats=self.num_key_value_groups)
+        if self.num_key_value_groups > 1:
+            key = torch.repeat_interleave(key, dim=2, repeats=self.num_key_value_groups)
+            value = torch.repeat_interleave(value, dim=2, repeats=self.num_key_value_groups)
         attention_mask = attention_mask if attention_mask is not None else torch.ones((query.shape[0], query.shape[1])).to(hidden_states.device)
         
         if self.config.use_flash:

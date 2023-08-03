@@ -266,8 +266,9 @@ class LlamaLayer(nn.Module):
         if self.config.pe_config['1d']:
             value = torch.cat([value, torch.zeros_like(value, device=value.device, dtype=value.dtype)], dim=-1)
 
-        key = torch.repeat_interleave(key, dim=1, repeats=self.num_key_value_groups)
-        value = torch.repeat_interleave(value, dim=1, repeats=self.num_key_value_groups)
+        if self.num_key_value_groups > 1:
+            key = torch.repeat_interleave(key, dim=2, repeats=self.num_key_value_groups)
+            value = torch.repeat_interleave(value, dim=2, repeats=self.num_key_value_groups)
         
         assert FlashAttention is not None, \
             "Detected flash_attn is not installed. See https://github.com/HazyResearch/flash-attention"

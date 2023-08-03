@@ -6,7 +6,9 @@ caches/
 
 wandb/
 csv_logs/
+
 test_model/
+hdd_new:s3:/
 
 nohup_logs/
 nohup.out

@@ -26,35 +26,17 @@ train_args = {
         'train_epochs': 2, 'optim': 'AdamW', 'learning_rate': 0.000075, 'weight_decay': 0.01, 
         'lr_scheduler_type': 'linear', 'warmup_ratio': 0.5, 'max_grad_norm': 2.5,
         'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 2,
-
-        # 'per_device_train_batch_size': 12, 'per_device_eval_batch_size': 12, 'num_train_epochs': 10,  # 4 cards
-        # 'do_train': True, 'do_eval': True, 'bf16': True, 'bf16_full_eval': True, 'optim': 'adamw_hf',
-        # 'learning_rate': 0.00015, 'weight_decay': 0.01, 'lr_scheduler_type': 'linear', 'warmup_ratio': 0.1,
-        # 'evaluation_strategy': 'epoch', 'eval_accumulation_steps': 1, 'max_grad_norm': 5.0,
-        # 'logging_strategy': 'steps', 'logging_steps': 10, 'output_dir': 'checkpoints', 'save_strategy': 'epoch',
-
-        # 'per_device_train_batch_size': 48, 'per_device_eval_batch_size': 24, 'num_train_epochs': 10,  # 4 cards
-        # 'do_train': True, 'do_eval': True, 'bf16': True, 'bf16_full_eval': True, 'optim': 'adamw_hf',
-        # 'learning_rate': 0.0003, 'weight_decay': 0.01, 'lr_scheduler_type': 'linear', 'warmup_ratio': 0.1,
-        # 'evaluation_strategy': 'epoch', 'eval_accumulation_steps': 1, 'max_grad_norm': 5.0,
-        # 'logging_strategy': 'steps', 'logging_steps': 10, 'output_dir': 'checkpoints', 'save_strategy': 'epoch',
     },
     ('330M', 2048): {
         'max_length': 2048, 'train_micro_batch_size': 12, 'eval_batch_size': 2, 
         'train_epochs': 2, 'optim': 'AdamW', 'learning_rate': 0.00015, 'weight_decay': 0.01, 
         'lr_scheduler_type': 'linear', 'warmup_ratio': 0.5, 'max_grad_norm': 5.,
         'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 2,
-
-        # 'per_device_train_batch_size': 12, 'per_device_eval_batch_size': 12, 'num_train_epochs': 10,  # 4 cards
-        # 'do_train': True, 'do_eval': True, 'bf16': True, 'bf16_full_eval': True, 'optim': 'adamw_hf',
-        # 'learning_rate': 0.0004, 'weight_decay': 0.01, 'lr_scheduler_type': 'linear', 'warmup_ratio': 0.1,
-        # 'evaluation_strategy': 'epoch', 'eval_accumulation_steps': 1, 'max_grad_norm': 5.0,
-        # 'logging_strategy': 'steps', 'logging_steps': 10, 'output_dir': 'checkpoints', 'save_strategy': 'epoch',
     },
     ('3B', 2048): {
         'max_length': 2048, 'train_micro_batch_size': 12, 'eval_batch_size': 2, 
-        'train_epochs': 1, 'optim': 'AdamW', 'learning_rate': 0.000075, 'weight_decay': 0.01, 
-        'lr_scheduler_type': 'linear', 'warmup_ratio': 0.5, 'max_grad_norm': 2.5,
+        'train_epochs': 1, 'optim': 'AdamW', 'learning_rate': 0.0003, 'weight_decay': 0.01, 
+        'lr_scheduler_type': 'linear', 'warmup_ratio': 0.25, 'max_grad_norm': 2.5,
         'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 1,
     },
 }
