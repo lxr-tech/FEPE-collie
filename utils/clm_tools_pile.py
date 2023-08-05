@@ -6,12 +6,13 @@ import os
 import json
 
 from io import StringIO
-from datetime import datetime
+from copy import deepcopy
 
 import torch
 import numpy as np
 
 from transformers import AutoTokenizer
+from datasets import Dataset
 
 from collie import env
 from collie.driver.io import PetrelIODriver
@@ -29,13 +30,8 @@ def get_pile_for_perplexity(train_length, test_lengths, train_path, test_path, t
     # 如何从pile路径找到books3子数据集，筛选出超过一定长度的，tokenize然后得到不同长度分段
 
     test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/{}'.format(test_path)
-    test_dataset_ = BookDataset(test_lengths=test_lengths, test_path=test_path)
-    test_datasets = {}
-    for test_length in test_lengths:
-        test_datasets[str(test_length)] = test_dataset_
-    
-    # 不同长度相同引用，前一次迭代完，内部会把对应长度下标+1
-    
+    test_datasets = get_book_for_evaluate(test_path=test_path, test_lengths=test_lengths)
+        
     return tokenizer, train_dataset, test_datasets
 
 
@@ -103,66 +99,111 @@ class PileDataset(torch.utils.data.Dataset):
                 'labels': torch.tensor(sample['tokens'][:self.train_length]).long(), }
  
 
-class BookDataset(torch.utils.data.Dataset):
+# class BookDataset(torch.utils.data.Dataset):
     
-    def __init__(self, test_path, test_lengths):
+#     def __init__(self, test_path, test_lengths):
         
-        self.cur_test_idx = 0
-        self.test_lengths = test_lengths
+#         self.cur_test_idx = 0
+#         self.test_lengths = test_lengths
         
-        self.path = 'hdd:s3://opennlplab_hdd/backup_trainig_data/valid/en/pile_Books3/val.bin'
+#         self.path = 'hdd:s3://opennlplab_hdd/backup_trainig_data/valid/en/pile_Books3/val.bin'
 
-        assert PetrelIODriver.exists(self.path + '.meta')
+#         assert PetrelIODriver.exists(self.path + '.meta')
         
-        meta = np.load(PetrelIODriver.load_buffer(self.path + '.meta'))
-        self.len, self.indices = 0, []
+#         meta = np.load(PetrelIODriver.load_buffer(self.path + '.meta'))
+#         self.len, self.indices = 0, []
          
-        if os.path.exists(test_path):
-            self.indices = torch.load(test_path)
-            self.len = len(self.indices)
-        else:
-            for sample in meta:
-                if sample[1] >= test_lengths[-1]:
-                    self.indices.append({'offset': sample[0]})
-                    self.len += 1
-            torch.save(self.indices, test_path)
+#         if os.path.exists(test_path):
+#             self.indices = torch.load(test_path)
+#             self.len = len(self.indices)
+#         else:
+#             for sample in meta:
+#                 if sample[1] >= test_lengths[-1]:
+#                     self.indices.append({'offset': sample[0]})
+#                     self.len += 1
+#             torch.save(self.indices, test_path)
             
-        self.cache = StringIO(PetrelIODriver.load(self.path, mode='r'))
+#         self.cache = StringIO(PetrelIODriver.load(self.path, mode='r'))
             
-        if env.local_rank == 0:
-            print("evaluate data num =", self.len)
+#         if env.local_rank == 0:
+#             print("evaluate data num =", self.len)
     
-    def __len__(self):
-        return self.len
+#     def __len__(self):
+#         return self.len
         
-    # def __iter__(self):
+#     # def __iter__(self):
         
-    #     if env.local_rank == 0:
-    #         print('evaluate length = ', self.test_lengths[self.cur_test_idx])
+#     #     if env.local_rank == 0:
+#     #         print('evaluate length = ', self.test_lengths[self.cur_test_idx])
         
-    #     dataset = StringIO(PetrelIODriver.load(self.path, mode='r'))
-    #     for line in dataset.readlines():
-    #         sample = json.loads(line.replace('\n', ''))
-    #         if len(sample['tokens']) < self.test_lengths[-1]:
-    #             continue
-    #         else:
-    #             yield {'input_ids': torch.tensor(sample['tokens'][:self.test_lengths[self.cur_test_idx]]), 
-    #                     'labels': torch.tensor(sample['tokens'][:self.test_lengths[self.cur_test_idx]]), }
+#     #     dataset = StringIO(PetrelIODriver.load(self.path, mode='r'))
+#     #     for line in dataset.readlines():
+#     #         sample = json.loads(line.replace('\n', ''))
+#     #         if len(sample['tokens']) < self.test_lengths[-1]:
+#     #             continue
+#     #         else:
+#     #             yield {'input_ids': torch.tensor(sample['tokens'][:self.test_lengths[self.cur_test_idx]]), 
+#     #                     'labels': torch.tensor(sample['tokens'][:self.test_lengths[self.cur_test_idx]]), }
         
-    #     self.cur_test_idx = (self.cur_test_idx + 1) % len(self.test_lengths)
+#     #     self.cur_test_idx = (self.cur_test_idx + 1) % len(self.test_lengths)
         
-    def __getitem__(self, index):
+#     def __getitem__(self, index):
         
-        if index == len(self) - 1:
-            self.cur_test_idx = (self.cur_test_idx + 1) % len(self.test_lengths)
+#         cur_test_idx = self.cur_test_idx
         
-        datadict = self.indices[index]
+#         if index == 0 and env.rank == 0:
+#             print("cur_test_length :", self.test_lengths[cur_test_idx])
+#         if index == len(self) - 1:
+#             self.cur_test_idx = (self.cur_test_idx + 1) % len(self.test_lengths)
         
-        self.cache.seek(datadict['offset'])
-        sample = json.loads(self.cache.readline())
-        return {'input_ids': torch.tensor(sample['tokens'][:self.train_length]).long(), 
-                'labels': torch.tensor(sample['tokens'][:self.train_length]).long(), }
+#         datadict = self.indices[index]
+        
+#         self.cache.seek(datadict['offset'])
+#         sample = json.loads(self.cache.readline())
+#         return {'input_ids': torch.tensor(sample['tokens'][:self.test_lengths[cur_test_idx]]).long(), 
+#                 'labels': torch.tensor(sample['tokens'][:self.test_lengths[cur_test_idx]]).long(), }
+
+
+def get_book_for_evaluate(test_path, test_lengths):
+
+    if os.path.exists(test_path):
+        return torch.load(test_path)
     
+    path = 'hdd:s3://opennlplab_hdd/backup_trainig_data/valid/en/pile_Books3/val.bin'
+    assert PetrelIODriver.exists(path + '.meta')
+    meta = np.load(PetrelIODriver.load_buffer(path + '.meta'))
+    data = StringIO(PetrelIODriver.load(path, mode='r'))
+    
+    indices = []    
+    if os.path.exists(test_path + '.meta'):
+        indices = torch.load(test_path + '.meta')
+    else:
+        for sample in meta:
+            if sample[1] >= test_lengths[-1]:
+                indices.append({'offset': sample[0]})
+        torch.save(indices, test_path + '.meta')
+
+    dataset = []
+    for datadict in indices:
+        data.seek(datadict['offset'])
+        sample = json.loads(data.readline())
+        dataset.append({'input_ids': torch.tensor(sample['tokens'][:test_lengths[0]]).long(), 
+                        'labels': torch.tensor(sample['tokens'][:test_lengths[0]]).long(), })
+    dataset = Dataset.from_list(dataset)
+    
+    if env.local_rank == 0:
+        print("evaluate data num =", len(dataset))
+
+    test_datasets = {}
+    for length in test_lengths:
+        print(length)
+        dataset = dataset.map(lambda instance: {'input_ids': instance['input_ids'][:length],
+                                                'labels': instance['input_ids'][:length]})
+        test_datasets[str(length)] = deepcopy(dataset)
+
+    torch.save(test_datasets, test_path)
+    return test_datasets
+
 
 class DummyDataset(torch.utils.data.Dataset):
     
@@ -178,6 +219,9 @@ class DummyDataset(torch.utils.data.Dataset):
         
         return {'input_ids': torch.ones((self.train_length, )).long(), 
                 'labels': torch.ones((self.train_length, )).long(), }
- 
 
-        
+
+if __name__ == "__main__":
+    test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/pile-test-3B-20480-books3.pkl'
+    test_lengths = [20480, 18432, 16384, 14336, 12288, 10240, 8192, 6144, 4096, 2048, 1024, ]
+    get_book_for_evaluate(test_path, test_lengths)

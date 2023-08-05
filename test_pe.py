@@ -9,11 +9,12 @@ from collie import env, setup_distribution
 
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation
-from utils.clm_tools_arxiv import get_arxiv_for_perplexity
+
+from models.mixed_llama_with_pe import LlamaForCausalLM
 
 tag, group, pe_config, model_args, train_args = arg_parse()
 
-rank = env.local_rank  #  int(os.environ["LOCAL_RANK"])
+rank = env.rank  #  int(os.environ["LOCAL_RANK"])
 size = env.world_size  #  int(os.environ["WORLD_SIZE"])
 
 config = CollieConfig.from_pretrained('decapoda-research/llama-7b-hf')
@@ -41,51 +42,33 @@ file_name = './csv_logs/{}-{}.txt'.format(group, tag)
     
 config.__setattr__('file_name', file_name)
 
-pe_config['flash_train'] = True
-pe_config['flash_test'] = True
-pe_config['init'] = True
-pe_config['post'] = False
-pe_config['both'] = False
-
-## old run loaded in huggingface version
-# import sys
-# sys.path.append('/remote-home/xrliu/projects/FEPE-deepspeed/')
-# from models.llama_with_pe import LlamaForCausalLM
-# model = LlamaForCausalLM.from_pretrained(pretrained_model_name_or_path='/remote-home/xrliu/projects/FEPE-deepspeed/checkpoints/init_pre_{}/train_last/'.format(tag), 
-#                                          pe_config=pe_config)
-
-## old run loaded in collie version (from_pretrained), wrong !
-# from models.collie_llama_with_pe import LlamaForCausalLM
-# model = LlamaForCausalLM.from_pretrained(model_path_or_name='/remote-home/xrliu/projects/FEPE-deepspeed/checkpoints/init_pre_{}/train_last/'.format(tag), 
-#                                          config=config)
-
-## old run loaded in collie version (from_config)
-import torch
-from models.flash_llama_with_pe import LlamaForCausalLM
-state_dict1 = torch.load('/remote-home/xrliu/projects/FEPE-deepspeed/checkpoints/init_pre_{}/train_last/pytorch_model.bin'.format(tag)) 
-state_dict2 = {}
-
-for key, value in state_dict1.items():
-    if key.startswith('model.'):
-        state_dict2[key[6:]] = value
-    else:
-        state_dict2[key] = value
-model = LlamaForCausalLM.from_config(config=config)
-model.load_state_dict(state_dict2)
-
-## new run loaded in collie version
-# model = LlamaForCausalLM.from_pretrained(model_path_or_name='./checkpoints/{}-{}/epoch_1'.format(group, tag), 
-#                                          config=config)
+model = LlamaForCausalLM.from_pretrained(model_path_or_name='./checkpoints/{}-{}/epoch_1'.format(group, tag), 
+                                         config=config)
 
 setup_distribution(config)
 
-train_length = train_args['max_length']
-test_lengths = [512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192, 9216, 10240, ]
-train_path = 'arxiv-train-{}-{}.pkl'.format(model_args['size'], train_args['max_length'])
-test_path = 'arxiv-test-{}-{}.pkl'.format(model_args['size'], test_lengths[-1])
+if model_args['size'] == '330M':
+    train_length = train_args['max_length']
+    test_lengths = [512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192, 9216, 10240, ]
 
-tokenizer, train_dataset, test_datasets = get_arxiv_for_perplexity(tokenizer=tokenizer, 
-    train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
+    train_path = 'arxiv-train-{}-{}.pkl'.format(model_args['size'], train_args['max_length'])
+    test_path = 'arxiv-test-{}-{}.pkl'.format(model_args['size'], test_lengths[-1])
+
+    from utils.clm_tools_arxiv import get_arxiv_for_perplexity
+    tokenizer, train_dataset, test_datasets = get_arxiv_for_perplexity(tokenizer=tokenizer, 
+        train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
+
+elif model_args['size'] == '3B':
+    train_length = train_args['max_length']
+    test_lengths = [1024, 2048, 4096, 6144, 8192, 10240, 12288, 14336, 16384, 18432, 20480, ]
+
+    train_path = 'pile-train-{}-{}.pkl'.format(model_args['size'], train_args['max_length'])
+    test_path = 'pile-test-{}-{}-books3.pkl'.format(model_args['size'], test_lengths[-1])
+
+    from utils.clm_tools_pile import get_pile_for_perplexity
+    num_training_data = int((3 * 1024 * 1024 * 1024) / train_length)  # 1572864
+    tokenizer, train_dataset, test_datasets = get_pile_for_perplexity(tokenizer=tokenizer, num_data=num_training_data, 
+        train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
 
 model_size = sum([param.nelement() for param in model.parameters()]) / 1e6
 
@@ -99,7 +82,7 @@ if rank == 0:
 
 evaluators = []
 
-for item in test_datasets:  # ['512', '1024', '2048', '4096']:  
+for item in test_datasets:
     evaluators.append(EvaluatorForExtrapolation(model=model, dataset=test_datasets[item], 
                                                 config=config, monitors=[EvalMonitor(config) ], 
                                                 metrics={'{}'.format(item): AccuracyMetric(gather_result=True), 

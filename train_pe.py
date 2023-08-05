@@ -8,18 +8,17 @@ from torch.optim import AdamW
 from datetime import datetime
 
 from transformers import get_linear_schedule_with_warmup
-# from deepspeed.runtime.lr_schedules import WarmupDecayLR
 
 from collie import CollieConfig, Trainer, env
 from collie import EvaluatorForPerplexity, PPLMetric, AccuracyMetric
 from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonitor
 from collie import ColliePadder, GPTLMLoss
+from collie import CheckpointCallback
 
-from models.collie_llama_with_pe import LlamaForCausalLM
+from models.mixed_llama_with_pe import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation
-# from utils.clm_tools_cpt import CheckpointCallback
 
 tag, group, pe_config, model_args, train_args = arg_parse()
 
@@ -33,7 +32,7 @@ config.checkpointing = True
 
 config.init_method = lambda x: torch.nn.init.normal_(x, mean=0., std=0.002) if x.ndim == 2 else torch.nn.init.ones_(x)
 
-if not tag.__contains__('rand'):
+if not group.__contains__('rand'):
     config.seed = 42
     torch.manual_seed(config.seed)
     torch.cuda.manual_seed_all(config.seed)
@@ -45,7 +44,7 @@ config.train_epochs = train_args['train_epochs']
 config.eval_per_n_epochs = train_args['eval_per_n_epochs']
 config.eval_per_n_steps = train_args['eval_per_n_steps']
 
-config.use_flash = False
+config.use_flash = True
 config.ds_config = {
     'bf16': {'enabled': True},
     'monitor_config': {
@@ -85,9 +84,11 @@ if model_args['size'] == '330M':
     tokenizer, train_dataset, test_datasets = get_arxiv_for_perplexity(tokenizer=tokenizer, 
         train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
 
-    num_training_batchs = math.floor(len(train_dataset) / config.train_micro_batch_size)
-    num_training_steps = math.floor(num_training_batchs / size) * train_args['train_epochs']
+    num_training_data = math.floor(len(train_dataset))
+    num_training_steps = math.floor(num_training_data / (config.train_micro_batch_size * size)) * train_args['train_epochs']
     num_warmup_steps = int(num_training_steps * train_args['warmup_ratio'])
+    
+    print(num_training_steps, num_warmup_steps, train_args['warmup_ratio'])
 
 elif model_args['size'] == '3B':
     train_length = train_args['max_length']
@@ -103,8 +104,10 @@ elif model_args['size'] == '3B':
     print(num_training_steps, num_warmup_steps, train_args['warmup_ratio'])
 
     from utils.clm_tools_pile import get_pile_for_perplexity
+    
     tokenizer, train_dataset, test_datasets = get_pile_for_perplexity(tokenizer=tokenizer, num_data=num_training_data, 
         train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
+    
     config.dataloader_num_workers = 0
     config.ds_config["zero_optimization"] = {"stage": 2, }
     
@@ -145,11 +148,11 @@ if rank == 0:
     print(train_args, '\n')
     print(config, '\n')
 
-# if not tag.__contains__('rand'):
-#     callbacks = [CheckpointCallback(folder='hdd_new:s3://hdd_new_model_weights/share/liuxiaoran/resumes/{}-{}'.format(group, tag), 
-#                                     model_only=False, peft_only=False, last=True, protocol="petrel")]
-# else:
-callbacks = []
+if not group.__contains__('rand') and not group.__contains__('debug'):
+    callbacks = [CheckpointCallback(folder='checkpoints/{}-{}'.format(group, tag), model_only=True, 
+                                    every_n_epochs=train_args['save_every_n_epochs'])]
+else:
+    callbacks = []
 
 trainer = Trainer(model=model, tokenizer=tokenizer, config=config,
                   optimizer=optimizer, lr_scheduler=lr_scheduler,
@@ -173,7 +176,6 @@ if env.rank == 0:
 
 try:
     trainer.train()
-    trainer.save_model(path='checkpoints/{}-{}'.format(group, tag))
 except BaseException as e:
     import sys
     import traceback

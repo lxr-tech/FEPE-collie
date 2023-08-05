@@ -123,7 +123,11 @@ class EvaluatorForExtrapolation(Evaluator):
         ppl = torch.exp(auto_param_call(evaluator.loss_fn, {**batch, **outputs},
                                         signature_fn=evaluator.loss_fn.forward if isinstance(evaluator.loss_fn, nn.Module) else evaluator.loss_fn))
             
-        seq_len = torch.sum(batch["attention_mask"], dim=-1) - 1
+               
+        if "attention_mask" in batch and batch["attention_mask"] is not None:        
+            seq_len = torch.sum(batch["attention_mask"], dim=-1) - 1
+        else:
+            seq_len = torch.sum((batch['input_ids'] != 0).int(), dim=-1) - 1
         
         logits = outputs.get('logits')[:, :-1, :].contiguous()
         target = batch['input_ids'][:, 1:].cuda().contiguous()
