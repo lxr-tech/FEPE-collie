@@ -23,7 +23,6 @@ from einops import rearrange
 
 try:
     from flash_attn.modules.mha import FlashSelfAttention as FlashAttention
-    from flash_attn.bert_padding import index_first_axis, unpad_input, pad_input
 except ModuleNotFoundError:
     FlashAttention = None
 
@@ -68,7 +67,6 @@ class RotaryPositionEmbedding(nn.Module):
             else:
                 omega = np.power(np.linspace(start, end, head_dim // 2), order)   # * beta * 2
                 omega = np.concatenate([omega, omega], axis=-1)
-            omega = omega[None, None, :]
             expos = (beta / omega) / (1/order * np.power(omega, 1/order - 1))  # * np.power(2 * beta, -1/order))
         else:
             if self.pe_config['1d']:
@@ -76,7 +74,6 @@ class RotaryPositionEmbedding(nn.Module):
             else:
                 omega = 1.0 / (10000.0 ** (np.arange(0, head_dim, 2) / head_dim))
                 omega = np.concatenate([omega, omega], axis=-1)
-            omega = omega[None, None, :]
             expos = np.ones_like(omega)
         self.register_buffer("omega", torch.tensor(omega), persistent=False)
         self.register_buffer("expos", torch.tensor(np.sqrt(expos)), persistent=False)
@@ -87,9 +84,10 @@ class RotaryPositionEmbedding(nn.Module):
             else:
                 scale = np.arange(0, head_dim, 1 if self.pe_config['1d'] else 2)
                 scale = scale if self.pe_config['1d'] else np.concatenate([scale, scale], axis=-1)
-                scale = scale[None, None, :]
             scale = (scale + 0.4 * head_dim) / (1.4 * head_dim)
-            self.register_buffer("scale", torch.tensor(scale), persistent=False)
+        else:
+            scale = np.ones_like(omega)
+        self.register_buffer("scale", torch.tensor(scale), persistent=False)
 
         # inv_freq = 1.0 / (10000.0 ** (
         #     torch.arange(0, head_dim, 2)[: (head_dim // 2)].float() / head_dim))
@@ -98,16 +96,21 @@ class RotaryPositionEmbedding(nn.Module):
     def forward(self,
                 query: torch.Tensor,
                 key: torch.Tensor,
-                index_ids):
+                index_ids, flash=True):
         dtype = query.dtype
+                
+        if flash:
+            # num_token, n_head (fixed for tp), head_dim 
+            omega, expos = self.omega[None, None, :].float(), self.expos[None, None, :].float()
+            scale, t = self.scale[None, None, :].float(), index_ids[:, None, None].float()
+            seq_len = index_ids.max()
+        else:
+            # batch_size, seq_len, n_head (fixed for tp), head_dim 
+            omega, expos = self.omega[None, None, None, :].float(), self.expos[None, None, None, :].float()
+            scale, t = self.scale[None, None, None, :].float(), index_ids[:, :, None, None].float()
+            seq_len = index_ids.max()            
         
-        # batch_size, seq_len, n_head (fixed for tp), head_dim 
-        
-        t = index_ids.reshape(-1, 1, 1).float()
-        seq_len = index_ids.max()
-        
-        theta = self.omega.float() * t
-        sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos.float()
+        sin, cos = torch.sin(omega * t), torch.cos(omega * t), 
 
         q, k = query.float() * expos, key.float() * expos
 
@@ -245,23 +248,28 @@ class LlamaLayer(nn.Module):
         self.past_key_values = None
         self.hidden_states = None
         
+        assert FlashAttention is not None, \
+            "Detected flash_attn is not installed. See https://github.com/HazyResearch/flash-attention"
+        
         self.flash_attn = FlashAttention(softmax_scale=1 / math.sqrt(self.head_dim), attention_dropout=0.)
 
-    def _forward(self, 
-                 hidden_states: torch.Tensor, index_ids, cu_seqlens):
+    def _forward(self, hidden_states, index_ids, cu_seqlens):
+        
         if not self.training:
             self.hidden_states = hidden_states
         else:
             self.hidden_states = None
+            
         assert hidden_states.ndim == 2, f"hidden_states.shape must be (T, H), but got {hidden_states.shape}"
 
         _hidden_states = self.input_layernorm(hidden_states)
         query, key, value = self.self_attn["q_proj"](_hidden_states), self.self_attn["k_proj"](
             _hidden_states), self.self_attn["v_proj"](_hidden_states)
+        
         query, key, value = rearrange(query, "t (h d) -> t h d", d=self.head_dim), \
             rearrange(key, "t (h d) -> t h d", d=self.head_dim), \
             rearrange(value, "t (h d) -> t h d", d=self.head_dim)
-        query, key = self.self_attn["rotary_emb"](query, key, index_ids)
+        query, key = self.self_attn["rotary_emb"](query, key, index_ids, flash=True)
         
         if self.config.pe_config['1d']:
             value = torch.cat([value, torch.zeros_like(value, device=value.device, dtype=value.dtype)], dim=-1)
@@ -270,9 +278,6 @@ class LlamaLayer(nn.Module):
             key = torch.repeat_interleave(key, dim=2, repeats=self.num_key_value_groups)
             value = torch.repeat_interleave(value, dim=2, repeats=self.num_key_value_groups)
         
-        assert FlashAttention is not None, \
-            "Detected flash_attn is not installed. See https://github.com/HazyResearch/flash-attention"
-        
         qkv = torch.stack([query, key, value], dim=1)
         output = self.flash_attn(qkv, cu_seqlens=cu_seqlens, max_seqlen=int(index_ids.max()), causal=True)
         
@@ -280,7 +285,6 @@ class LlamaLayer(nn.Module):
             output = output[..., :self.head_dim]
         
         output = rearrange(output, "t h d -> t (h d)")
-
         output = F.dropout(output, p=self.config.dropout, training=self.training)
         hidden_states = hidden_states + self.self_attn["o_proj"](output)
         _hidden_states = self.post_attention_layernorm(hidden_states)
@@ -294,7 +298,7 @@ class LlamaLayer(nn.Module):
                 self._forward,
                 inputs["hidden_states"],
                 inputs["index_ids"],
-                inputs["cu_seqlens"]
+                inputs["cu_seqlens"],
             )
         else:
             inputs["hidden_states"] = self._forward(**inputs)
@@ -304,6 +308,9 @@ class LlamaLayer(nn.Module):
 class LlamaForCausalLM(CollieModelForCausalLM):
     
     def __init__(self, config: CollieConfig) -> None:
+        
+        assert config.use_flash
+        
         super().__init__(config)
         self.embed_tokens = tensor_parallel.VocabParallelEmbedding(
             self.collie_config.vocab_size,
@@ -329,47 +336,67 @@ class LlamaForCausalLM(CollieModelForCausalLM):
 
     def forward(self, 
                 input_ids: Optional[torch.Tensor] = None, 
-                attention_mask: Optional[torch.Tensor] = None, 
+                index_ids: Optional[torch.Tensor] = None, 
+                seqlen: Optional[torch.Tensor] = None, 
                 past_key_values: Optional[Tuple[torch.Tensor]] = None,
                 **kwargs):
         
-        assert input_ids.ndim == 2
-        batch, seqlen = input_ids.shape
+        assert input_ids.ndim == 2, f"hidden_states.shape must be (B, T), but got {input_ids.shape}"
         
-        if attention_mask is None:
-            attention_mask = (input_ids != 0).int()
-        
-        seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
-        indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
-        cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0))
+        # print("before :")
+        # print("input_ids ,", input_ids)  # (batch_size, num_token_per_batch), no padding, fill batch with exactly the same tokens maybe from different data
+        # print("index_ids ,", index_ids)  # (batch_size, num_token_per_batch), no padding, mark the index of each token, index begins from 0 if data splitted
+        # print("seqlen ,", seqlen)  # (batch_size, max_data_per_batch), with padding, mark the length of each date, pad with 0 automatically
+       
+        if index_ids is None or seqlen is None:
+            batch_size, seqlen = input_ids.shape
+            index_ids = torch.arange(seqlen, device='cuda').reshape((1, -1)) * (input_ids != 0).int()
+            seqlen = torch.sum((input_ids != 0).int(), dim=-1)
+            
+        indices = torch.nonzero((seqlen != 0).int().flatten(), as_tuple=False).flatten()
+        seqlen = torch.gather(seqlen.flatten(), 0, indices).reshape(-1,)       
+        cu_seqlens = F.pad(torch.cumsum(seqlen, dim=0, dtype=torch.torch.int32), (1, 0))
 
-        input_ids = torch.gather(input_ids.flatten(), 0, indices).reshape(-1,)
-        
-        # input_ids, indices, cu_seqlens, max_seqlen_in_batch = unpad_input(input_ids, attention_mask.bool())
-        
-        index_ids = torch.arange(seqlen, device='cuda').reshape((1, -1)) * attention_mask
+        indices = torch.nonzero((input_ids != 0).int().flatten(), as_tuple=False).flatten()
+        input_ids = torch.gather(input_ids.flatten(), 0, indices).reshape(-1,)       
         index_ids = torch.gather(index_ids.flatten(), 0, indices).reshape(-1,)
-
         inputs = {"hidden_states": self.embed_tokens(input_ids), "index_ids": index_ids, "cu_seqlens": cu_seqlens}
-        
+         
+        # print("after :")
+        # print("input_ids ,", input_ids)  # (total_token, ), unpadded, gather the token in one sequence
+        # print("index_ids ,", index_ids)  # (total_token, ), unpadded, gather the index in one sequence
+        # print("cu_seqlens ,", cu_seqlens)  # (num_data + 1, ), unpadded, mark the starting and ending point of each data, from 0 to 2048 * num_token_per_batch
+       
         all_hidden_states = ()
         for layer in self.layers:
-            
             all_hidden_states += (inputs["hidden_states"],)
             inputs.update(layer(inputs))
-            
-        inputs["hidden_states"] = pad_input(inputs["hidden_states"], indices, batch, seqlen)
         
         inputs["hidden_states"] = self.norm(inputs["hidden_states"])
         all_hidden_states += (inputs["hidden_states"], )
-        inputs["logits"] = self.lm_head(inputs["hidden_states"])
-        return CausalLMOutputWithPast(
-            loss=None,
-            logits=inputs["logits"],
-            past_key_values=self._get_past_key_values(self.layers),
-            hidden_states=all_hidden_states,
-            attentions=None
-        )
+        logits = self.lm_head(inputs["hidden_states"])
+       
+        batch_size, max_len = seqlen.shape[0], int(index_ids.max()) + 1
+        index_ids = torch.arange(max_len, device='cuda').reshape((1, -1)) * torch.ones((batch_size, ), device='cuda').reshape((-1, 1)) + 1
+        index_ids = index_ids * (index_ids <= seqlen.reshape((-1, 1))).int()
+        indices = torch.nonzero(index_ids.flatten(), as_tuple=False).flatten()
+        
+        output = torch.zeros((batch_size * max_len, self.collie_config.vocab_size), device=logits.device, dtype=logits.dtype)
+        output[indices] = logits
+        logits = rearrange(output, '(b s) ... -> b s ...', b=batch_size)
+        
+        output = torch.zeros((batch_size * max_len, ), device=input_ids.device, dtype=input_ids.dtype)
+        output[indices] = input_ids
+        labels = rearrange(output, '(b s) -> b s', b=batch_size)
+    
+        # print("final :")
+        # print("logits ,", logits)  # (num_data, max_data_per_batch, vocab_size), padded, gather the logits in batch of data instead of token num
+        # print("labels ,", labels)  # (num_data, max_data_per_batch, ),           padded, gather the labels in batch of data instead of token num
+        
+        output = CausalLMOutputWithPast(loss=None, logits=logits, hidden_states=all_hidden_states,
+                                        past_key_values=self._get_past_key_values(self.layers), attentions=None)
+        output['labels'] = labels
+        return output
 
     def clean(self):
         self._clean_hidden_states([*self.layers, self.lm_head])

@@ -70,99 +70,46 @@ class PileDataset(torch.utils.data.Dataset):
             torch.save(self.indices, train_path)
             
         self.len = num_data if num_data >= 0 else self.len + 1 + num_data
-        self.indices = self.indices[:self.len]
+        
+        self.token_buffer, self.index_buffer, self.seqlen = [], [], []
+        self.pivot, self.real_len = env.dp_rank, len(self.indices)
             
         if env.local_rank == 0:
-            print("pretrain data num =", self.len)
-        self.max_retry = 100
-    
+            print("pretrain data num =", self.len, ", while the real num =", self.real_len)
+        
     def __len__(self):
         return self.len
     
-    # def __iter__(self): 
-    #     for datafile in self.datafiles:
-    #         dataset = StringIO(PetrelIODriver.load(self.path + datafile, mode='r'))
-    #         for line in dataset.readlines():
-    #             sample = json.loads(line.replace('\n', ''))
-    #             yield {'input_ids': torch.tensor(sample['tokens'][:self.train_length]), 
-    #                    'labels': torch.tensor(sample['tokens'][:self.train_length]), }
-    
-    def __getitem__(self, index):
+    def __getitem__(self, _):
         
-        datadict = self.indices[index]
-        if self.cur_file_name is None or self.cache is None or self.cur_file_name != datadict['file']:
-            self.cur_file_name, self.cache = datadict['file'], StringIO(PetrelIODriver.load(datadict['file'], mode='r'))
+        while len(self.token_buffer) < self.train_length:
+            self.pivot = (self.pivot + env.dp_size) % self.real_len
+            datadict = self.indices[self.pivot]
+            if self.cur_file_name is None or self.cache is None or self.cur_file_name != datadict['file']:
+                self.cur_file_name, self.cache = datadict['file'], StringIO(PetrelIODriver.load(datadict['file'], mode='r'))
+            self.cache.seek(datadict['offset'])
+            sample = json.loads(self.cache.readline())    
+            self.token_buffer.extend(sample['tokens'])
+            self.index_buffer.extend(range(len(sample['tokens'])))
+            self.seqlen.append(len(sample['tokens']))
             
-        self.cache.seek(datadict['offset'])
-        sample = json.loads(self.cache.readline())        
-        return {'input_ids': torch.tensor(sample['tokens'][:self.train_length]).long(), 
-                'labels': torch.tensor(sample['tokens'][:self.train_length]).long(), }
+        input_ids = self.token_buffer[:self.train_length]
+        index_ids = self.index_buffer[:self.train_length]
+        
+        seqlen = self.seqlen
+        extra_length = len(self.token_buffer) - self.train_length
+        seqlen[-1] -= extra_length
+
+        self.index_buffer = []
+        self.index_buffer.extend(range(extra_length))
+        self.seqlen = [] if extra_length == 0 else [extra_length]
+        self.token_buffer = self.token_buffer[self.train_length:]
+
+        assert len(self.token_buffer) == len(self.index_buffer)
+        
+        return {"input_ids": torch.tensor(input_ids).long(), "labels": torch.tensor(input_ids).long(),
+                "index_ids": torch.tensor(index_ids).long(), "seqlen": torch.tensor(seqlen).long()}
  
-
-# class BookDataset(torch.utils.data.Dataset):
-    
-#     def __init__(self, test_path, test_lengths):
-        
-#         self.cur_test_idx = 0
-#         self.test_lengths = test_lengths
-        
-#         self.path = 'hdd:s3://opennlplab_hdd/backup_trainig_data/valid/en/pile_Books3/val.bin'
-
-#         assert PetrelIODriver.exists(self.path + '.meta')
-        
-#         meta = np.load(PetrelIODriver.load_buffer(self.path + '.meta'))
-#         self.len, self.indices = 0, []
-         
-#         if os.path.exists(test_path):
-#             self.indices = torch.load(test_path)
-#             self.len = len(self.indices)
-#         else:
-#             for sample in meta:
-#                 if sample[1] >= test_lengths[-1]:
-#                     self.indices.append({'offset': sample[0]})
-#                     self.len += 1
-#             torch.save(self.indices, test_path)
-            
-#         self.cache = StringIO(PetrelIODriver.load(self.path, mode='r'))
-            
-#         if env.local_rank == 0:
-#             print("evaluate data num =", self.len)
-    
-#     def __len__(self):
-#         return self.len
-        
-#     # def __iter__(self):
-        
-#     #     if env.local_rank == 0:
-#     #         print('evaluate length = ', self.test_lengths[self.cur_test_idx])
-        
-#     #     dataset = StringIO(PetrelIODriver.load(self.path, mode='r'))
-#     #     for line in dataset.readlines():
-#     #         sample = json.loads(line.replace('\n', ''))
-#     #         if len(sample['tokens']) < self.test_lengths[-1]:
-#     #             continue
-#     #         else:
-#     #             yield {'input_ids': torch.tensor(sample['tokens'][:self.test_lengths[self.cur_test_idx]]), 
-#     #                     'labels': torch.tensor(sample['tokens'][:self.test_lengths[self.cur_test_idx]]), }
-        
-#     #     self.cur_test_idx = (self.cur_test_idx + 1) % len(self.test_lengths)
-        
-#     def __getitem__(self, index):
-        
-#         cur_test_idx = self.cur_test_idx
-        
-#         if index == 0 and env.rank == 0:
-#             print("cur_test_length :", self.test_lengths[cur_test_idx])
-#         if index == len(self) - 1:
-#             self.cur_test_idx = (self.cur_test_idx + 1) % len(self.test_lengths)
-        
-#         datadict = self.indices[index]
-        
-#         self.cache.seek(datadict['offset'])
-#         sample = json.loads(self.cache.readline())
-#         return {'input_ids': torch.tensor(sample['tokens'][:self.test_lengths[cur_test_idx]]).long(), 
-#                 'labels': torch.tensor(sample['tokens'][:self.test_lengths[cur_test_idx]]).long(), }
-
 
 def get_book_for_evaluate(test_path, test_lengths):
 
@@ -222,6 +169,22 @@ class DummyDataset(torch.utils.data.Dataset):
 
 
 if __name__ == "__main__":
-    test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/pile-test-3B-20480-books3.pkl'
-    test_lengths = [20480, 18432, 16384, 14336, 12288, 10240, 8192, 6144, 4096, 2048, 1024, ]
-    get_book_for_evaluate(test_path, test_lengths)
+    
+    import sentencepiece as spm
+    tokenizer = spm.SentencePieceProcessor()
+    tokenizer.load('/mnt/petrelfs/share_data/yanhang/tokenizes/llama.model')
+    
+    dataset = PileDataset(train_path='/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/pile-train-3B-2048.pkl', 
+                          train_length=2048, num_data=3)
+    sample = dataset[0]
+    print(sample['cu_seqlens'])
+    text = tokenizer.decode_ids(sample['input_ids'][sample['cu_seqlens'][1]:sample['cu_seqlens'][2]].tolist())
+    print(text)
+    sample = dataset[0]
+    print(sample['cu_seqlens'])
+    text = tokenizer.decode_ids(sample['input_ids'][sample['cu_seqlens'][0]:sample['cu_seqlens'][1]].tolist())
+    print(text)
+    
+    # test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/pile-test-3B-20480-books3.pkl'
+    # test_lengths = [20480, 18432, 16384, 14336, 12288, 10240, 8192, 6144, 4096, 2048, 1024, ]
+    # get_book_for_evaluate(test_path, test_lengths)

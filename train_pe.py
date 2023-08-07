@@ -15,7 +15,7 @@ from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonito
 from collie import ColliePadder, GPTLMLoss
 from collie import CheckpointCallback
 
-from models.mixed_llama_with_pe import LlamaForCausalLM
+from models.flash_llama_with_pe import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation
@@ -84,8 +84,8 @@ if model_args['size'] == '330M':
     tokenizer, train_dataset, test_datasets = get_arxiv_for_perplexity(tokenizer=tokenizer, 
         train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
 
-    num_training_data = math.floor(len(train_dataset))
-    num_training_steps = math.floor(num_training_data / (config.train_micro_batch_size * size)) * train_args['train_epochs']
+    num_data = math.floor(len(train_dataset))
+    num_training_steps = math.floor(num_data / (train_args['train_micro_batch_size'] * size)) * train_args['train_epochs']
     num_warmup_steps = int(num_training_steps * train_args['warmup_ratio'])
     
     print(num_training_steps, num_warmup_steps, train_args['warmup_ratio'])
@@ -97,15 +97,15 @@ elif model_args['size'] == '3B':
     train_path = 'pile-train-{}-{}.pkl'.format(model_args['size'], train_args['max_length'])
     test_path = 'pile-test-{}-{}-books3.pkl'.format(model_args['size'], test_lengths[-1])
 
-    num_training_data = int((3 * 1024 * 1024 * 1024) / train_length)  # 1572864
-    num_training_steps = math.floor(num_training_data / (config.train_micro_batch_size * size)) * train_args['train_epochs']
+    num_data = int((3 * 1024 * 1024 * 1024) / train_length)  # 1572864
+    num_training_steps = math.floor(num_data / (train_args['train_micro_batch_size'] * size)) * train_args['train_epochs']
     num_warmup_steps = int(num_training_steps * train_args['warmup_ratio'])
     
     print(num_training_steps, num_warmup_steps, train_args['warmup_ratio'])
 
     from utils.clm_tools_pile import get_pile_for_perplexity
     
-    tokenizer, train_dataset, test_datasets = get_pile_for_perplexity(tokenizer=tokenizer, num_data=num_training_data, 
+    tokenizer, train_dataset, test_datasets = get_pile_for_perplexity(tokenizer=tokenizer, num_data=num_data, 
         train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
     
     config.dataloader_num_workers = 0
@@ -124,9 +124,6 @@ if train_args['lr_scheduler_type'] == 'linear':
     lr_scheduler = get_linear_schedule_with_warmup(optimizer=optimizer, 
                                                    num_training_steps=num_training_steps,
                                                    num_warmup_steps=num_warmup_steps)
-    # lr_scheduler = WarmupDecayLR(optimizer=optimizer, total_num_steps=num_training_steps, 
-    #                          warmup_min_lr=0., warmup_max_lr=train_args['learning_rate'], 
-    #                          warmup_num_steps=num_warmup_steps, warmup_type='linear')
 else:
     lr_scheduler = None
 
