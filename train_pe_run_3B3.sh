@@ -1,4 +1,4 @@
 
 srun -p llm --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --cpus-per-task=8 --quotatype=reserved \
- --pty --kill-on-bad-exit=1 python train_pe.py --model_size='3B' --max_length=2048 \
- --dim='1d' --exp='xpos' --imp='imp' --ln='log' --tag='xpos_imp_1d_log' --group='pjlab_fepe_3B2_2048'
+ --pty -w SH-IDC1-10-140-1-[169,172,176,177] --kill-on-bad-exit=1 python train_pe.py --model_size='3B' --max_length=2048 \
+ --dim='1d' --exp='xpos' --imp='imp' --ln='log' --tag='xpos_imp_1d_log_v2.0.4_16B' --group='pjlab_fepe_3B2_2048'

@@ -2,20 +2,20 @@ import sentencepiece as spm
 
 model_paths = [
     '/mnt/petrelfs/share_data/yanhang/tokenizes/llama.model',
-    '/mnt/petrelfs/share_data/yanhang/tokenizes/llama-ar.model',
-    '/mnt/petrelfs/share_data/yanhang/tokenizes/llamav4.model',
-    '/mnt/petrelfs/share_data/yanhang/tokenizes/v10.model',
-    '/mnt/petrelfs/share_data/yanhang/tokenizes/v6_tokenizer/spiece.model',
-    '/mnt/petrelfs/share_data/yanhang/tokenizes/V7_sft.model',
-    '/mnt/petrelfs/share_data/yanhang/tokenizes/v6_standard.model',
-    '/mnt/petrelfs/share_data/yanhang/tokenizes/V7.model',
-    '/mnt/petrelfs/share_data/yanhang/tokenizes/v9.model'
+    # '/mnt/petrelfs/share_data/yanhang/tokenizes/llama-ar.model',
+    # '/mnt/petrelfs/share_data/yanhang/tokenizes/llamav4.model',
+    # '/mnt/petrelfs/share_data/yanhang/tokenizes/v10.model',
+    # '/mnt/petrelfs/share_data/yanhang/tokenizes/v6_tokenizer/spiece.model',
+    # '/mnt/petrelfs/share_data/yanhang/tokenizes/V7_sft.model',
+    # '/mnt/petrelfs/share_data/yanhang/tokenizes/v6_standard.model',
+    # '/mnt/petrelfs/share_data/yanhang/tokenizes/V7.model',
+    # '/mnt/petrelfs/share_data/yanhang/tokenizes/v9.model'
 ]
 
 for model_path in model_paths:
     
     sp = spm.SentencePieceProcessor()
-    print(model_path)
+    print(type(sp), model_path)
     
     sp.load(model_path)
 

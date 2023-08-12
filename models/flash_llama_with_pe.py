@@ -278,8 +278,9 @@ class LlamaLayer(nn.Module):
             key = torch.repeat_interleave(key, dim=2, repeats=self.num_key_value_groups)
             value = torch.repeat_interleave(value, dim=2, repeats=self.num_key_value_groups)
         
-        qkv = torch.stack([query, key, value], dim=1)
+        qkv = torch.stack([query, key, value], dim=1).bfloat16()
         output = self.flash_attn(qkv, cu_seqlens=cu_seqlens, max_seqlen=int(index_ids.max()), causal=True)
+        output = output.to(value.dtype)
         
         if self.config.pe_config['1d']:
             output = output[..., :self.head_dim]
@@ -349,14 +350,14 @@ class LlamaForCausalLM(CollieModelForCausalLM):
         # print("seqlen ,", seqlen)  # (batch_size, max_data_per_batch), with padding, mark the length of each date, pad with 0 automatically
        
         if index_ids is None or seqlen is None:
-            batch_size, seqlen = input_ids.shape
-            index_ids = torch.arange(seqlen, device='cuda').reshape((1, -1)) * (input_ids != 0).int()
+            batch_size, max_len = input_ids.shape
+            index_ids = torch.arange(max_len, device='cuda').reshape((1, -1)) * (input_ids != 0).int()
             seqlen = torch.sum((input_ids != 0).int(), dim=-1)
             
         indices = torch.nonzero((seqlen != 0).int().flatten(), as_tuple=False).flatten()
         seqlen = torch.gather(seqlen.flatten(), 0, indices).reshape(-1,)       
         cu_seqlens = F.pad(torch.cumsum(seqlen, dim=0, dtype=torch.torch.int32), (1, 0))
-
+        
         indices = torch.nonzero((input_ids != 0).int().flatten(), as_tuple=False).flatten()
         input_ids = torch.gather(input_ids.flatten(), 0, indices).reshape(-1,)       
         index_ids = torch.gather(index_ids.flatten(), 0, indices).reshape(-1,)
@@ -371,23 +372,24 @@ class LlamaForCausalLM(CollieModelForCausalLM):
         for layer in self.layers:
             all_hidden_states += (inputs["hidden_states"],)
             inputs.update(layer(inputs))
+       
+        # batch_size, max_len = seqlen.shape[0], int(index_ids.max()) + 1
+        # index_ids = torch.arange(max_len, device='cuda').reshape((1, -1)) * torch.ones((batch_size, ), device='cuda').reshape((-1, 1)) + 1
+        # index_ids = index_ids * (index_ids <= seqlen.reshape((-1, 1))).int()
+        # indices = torch.nonzero(index_ids.flatten(), as_tuple=False).flatten()
         
-        inputs["hidden_states"] = self.norm(inputs["hidden_states"])
+        hidden = inputs["hidden_states"]
+        # output = torch.zeros((batch_size * max_len, self.collie_config.hidden_size), device=hidden.device, dtype=hidden.dtype)
+        # output[indices] = hidden
+        # hidden = rearrange(output, '(b s) ... -> b s ...', b=batch_size)
+
+        inputs["hidden_states"] = self.norm(hidden)
         all_hidden_states += (inputs["hidden_states"], )
         logits = self.lm_head(inputs["hidden_states"])
-       
-        batch_size, max_len = seqlen.shape[0], int(index_ids.max()) + 1
-        index_ids = torch.arange(max_len, device='cuda').reshape((1, -1)) * torch.ones((batch_size, ), device='cuda').reshape((-1, 1)) + 1
-        index_ids = index_ids * (index_ids <= seqlen.reshape((-1, 1))).int()
-        indices = torch.nonzero(index_ids.flatten(), as_tuple=False).flatten()
         
-        output = torch.zeros((batch_size * max_len, self.collie_config.vocab_size), device=logits.device, dtype=logits.dtype)
-        output[indices] = logits
-        logits = rearrange(output, '(b s) ... -> b s ...', b=batch_size)
-        
-        output = torch.zeros((batch_size * max_len, ), device=input_ids.device, dtype=input_ids.dtype)
-        output[indices] = input_ids
-        labels = rearrange(output, '(b s) -> b s', b=batch_size)
+        # output = torch.zeros((batch_size * max_len, ), device=input_ids.device, dtype=input_ids.dtype)
+        # output[indices] = input_ids
+        # labels = rearrange(output, '(b s) -> b s', b=batch_size)
     
         # print("final :")
         # print("logits ,", logits)  # (num_data, max_data_per_batch, vocab_size), padded, gather the logits in batch of data instead of token num
@@ -395,7 +397,7 @@ class LlamaForCausalLM(CollieModelForCausalLM):
         
         output = CausalLMOutputWithPast(loss=None, logits=logits, hidden_states=all_hidden_states,
                                         past_key_values=self._get_past_key_values(self.layers), attentions=None)
-        output['labels'] = labels
+        output['labels'] = input_ids
         return output
 
     def clean(self):

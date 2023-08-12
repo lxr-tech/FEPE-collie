@@ -18,6 +18,19 @@ from collie.utils import progress, env, setup_ds_engine, BaseProvider, _Generati
 from collie import Evaluator
 
 
+class FlashGPTLMLoss(torch.nn.Module):
+
+    def __init__(self, ignore_index=-100):
+        super().__init__()
+        self.ignore_index = ignore_index
+        self.loss = torch.nn.CrossEntropyLoss(ignore_index=ignore_index)  # ignore <pad> when compute loss
+    
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor):
+        shift_logits = logits[:-1, :].contiguous()
+        shift_labels = labels[1:].contiguous().to(logits.device)
+        return self.loss(shift_logits, shift_labels)
+
+
 class EvaluatorForExtrapolation(Evaluator):
     def __init__(self, 
                  loss_fn: Callable = GPTLMLoss(),
@@ -122,13 +135,13 @@ class EvaluatorForExtrapolation(Evaluator):
         
         ppl = torch.exp(auto_param_call(evaluator.loss_fn, {**outputs},
                                         signature_fn=evaluator.loss_fn.forward if isinstance(evaluator.loss_fn, nn.Module) else evaluator.loss_fn))
-        seq_len = torch.sum((outputs.get('labels') != 0).int(), dim=-1) - 1
-        logits = outputs.get('logits')[:, :-1, :].contiguous()
-        target = outputs.get('labels')[:, 1:].cuda().contiguous()
+        # seq_len = torch.sum((batch['labels'] != 0).int(), dim=-1) - 1
+        logits = outputs.get('logits')[:-1, :].contiguous()
+        target = outputs.get('labels')[1:].cuda().contiguous()
         pred = torch.max(logits, dim=-1)[1]
 
         return {
             'target': target.detach().cuda(), 'pred': pred.detach().cuda(),
-            'seq_len': seq_len.cuda(), 'ppl': ppl.detach().clone().view(1,).cuda(),
+            'ppl': ppl.detach().clone().view(1,).cuda(),  # 'seq_len': seq_len.cuda(), 
         }
         

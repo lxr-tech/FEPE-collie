@@ -11,15 +11,17 @@ from copy import deepcopy
 import torch
 import numpy as np
 
-from transformers import AutoTokenizer
 from datasets import Dataset
+from transformers import AutoTokenizer
+
+import sentencepiece as spm
 
 from collie import env
 from collie.driver.io import PetrelIODriver
 
 
 def get_pile_for_perplexity(train_length, test_lengths, train_path, test_path, tokenizer, num_data):
-
+    
     tokenizer = AutoTokenizer.from_pretrained(tokenizer, use_fast=False)
     
     # 如何从pile路径搞定一个on-the-fly的collie-datasset，我也不清楚迭代几个epoch，但知道多少step
@@ -107,8 +109,8 @@ class PileDataset(torch.utils.data.Dataset):
 
         assert len(self.token_buffer) == len(self.index_buffer)
         
-        return {"input_ids": torch.tensor(input_ids).long(), "labels": torch.tensor(input_ids).long(),
-                "index_ids": torch.tensor(index_ids).long(), "seqlen": torch.tensor(seqlen).long()}
+        return {"input_ids": torch.tensor(input_ids).long(),  # "labels": torch.tensor(input_ids).long(),
+                "index_ids": torch.tensor(index_ids).long(), "seqlen": torch.tensor(seqlen).long()}  # 
  
 
 def get_book_for_evaluate(test_path, test_lengths):

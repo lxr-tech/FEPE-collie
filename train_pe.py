@@ -9,16 +9,18 @@ from datetime import datetime
 
 from transformers import get_linear_schedule_with_warmup
 
+import sys
+sys.path.append('../collie/')
+
 from collie import CollieConfig, Trainer, env
 from collie import EvaluatorForPerplexity, PPLMetric, AccuracyMetric
 from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonitor
-from collie import ColliePadder, GPTLMLoss
-from collie import CheckpointCallback
+from collie import ColliePadder, CheckpointCallback
 
 from models.flash_llama_with_pe import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
-from utils.clm_tools_acc import EvaluatorForExtrapolation
+from utils.clm_tools_acc import EvaluatorForExtrapolation, FlashGPTLMLoss
 
 tag, group, pe_config, model_args, train_args = arg_parse()
 
@@ -27,6 +29,7 @@ config.model_config.hidden_size = model_args['hidden_size']
 config.model_config.intermediate_size = model_args['intermediate_size']
 config.model_config.num_attention_heads = model_args['num_attention_heads']
 config.model_config.num_hidden_layers = model_args['num_hidden_layers']
+# config.model_config.torch_dtype = torch.float32
 config.model_config.use_cache = False
 config.checkpointing = True
 
@@ -43,10 +46,16 @@ config.eval_batch_size = train_args['eval_batch_size']
 config.train_epochs = train_args['train_epochs']
 config.eval_per_n_epochs = train_args['eval_per_n_epochs']
 config.eval_per_n_steps = train_args['eval_per_n_steps']
+config.dataloader_num_workers = 0
+config.low_cpu_mem_usage = False
 
 config.use_flash = True
 config.ds_config = {
-    'bf16': {'enabled': True},
+    'bf16': {
+        'enabled': True,
+        'auto_cast': True,
+        'loss_scale_window': 0,  # 2 ** 16,
+    },
     'monitor_config': {
         'enabled': True,
         'tag': tag,  # tag 表示 一次run的名字，对应图表中 一条线
@@ -58,6 +67,37 @@ config.ds_config = {
         }
     },
     'gradient_clipping': train_args['max_grad_norm'],
+    'zero_optimization': {
+        "stage": 3, 
+        # "reduce_bucket_size": 10000000,
+        # "reduce_scatter": True,
+
+        # "zero_quantized_weights": True,
+        # "zero_hpz_partition_size": 16,
+        # "zero_quantized_gradients": True,
+
+        # "contiguous_gradients": True,
+        # "overlap_comm": True
+    },
+    "optimizer": {
+        "type": train_args['optim'],
+        "params": {
+            "lr": train_args['learning_rate'],
+            "betas": [0.9, 0.999],
+            "eps": 1e-8,
+            "weight_decay": train_args['weight_decay']
+        }
+    },
+    'scheduler': {
+        'type': 'WarmupDecayLR',
+        'params': {
+            'warmup_min_lr': train_args['learning_rate'] / 2000,
+            'warmup_max_lr': train_args['learning_rate'],
+            'warmup_num_steps': 468,
+            'total_num_steps': 4681,
+            'warmup_type': 'linear'
+        }
+    }
 }
 
 config.__setattr__('pe_config', pe_config)
@@ -71,7 +111,6 @@ tokenizer = model_args['tokenizer']
 model = LlamaForCausalLM.from_config(config=config)
 
 rank = env.rank  #  int(os.environ["rank"])
-size = env.world_size  #  int(os.environ["WORLD_SIZE"])
 
 if model_args['size'] == '330M':
     train_length = train_args['max_length']
@@ -85,7 +124,7 @@ if model_args['size'] == '330M':
         train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
 
     num_data = math.floor(len(train_dataset))
-    num_training_steps = math.floor(num_data / (train_args['train_micro_batch_size'] * size)) * train_args['train_epochs']
+    num_training_steps = math.floor(num_data / (train_args['train_micro_batch_size'] * env.dp_size)) * train_args['train_epochs']
     num_warmup_steps = int(num_training_steps * train_args['warmup_ratio'])
     
     print(num_training_steps, num_warmup_steps, train_args['warmup_ratio'])
@@ -97,8 +136,8 @@ elif model_args['size'] == '3B':
     train_path = 'pile-train-{}-{}.pkl'.format(model_args['size'], train_args['max_length'])
     test_path = 'pile-test-{}-{}-books3.pkl'.format(model_args['size'], test_lengths[-1])
 
-    num_data = int((3 * 1024 * 1024 * 1024) / train_length)  # 1572864
-    num_training_steps = math.floor(num_data / (train_args['train_micro_batch_size'] * size)) * train_args['train_epochs']
+    num_data = int((16 * 1024 * 1024 * 1024) / train_length)  # 1572864
+    num_training_steps = math.floor(num_data / (train_args['train_micro_batch_size'] * env.dp_size)) * train_args['train_epochs']
     num_warmup_steps = int(num_training_steps * train_args['warmup_ratio'])
     
     print(num_training_steps, num_warmup_steps, train_args['warmup_ratio'])
@@ -107,25 +146,22 @@ elif model_args['size'] == '3B':
     
     tokenizer, train_dataset, test_datasets = get_pile_for_perplexity(tokenizer=tokenizer, num_data=num_data, 
         train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
-    
-    config.dataloader_num_workers = 0
-    config.ds_config["zero_optimization"] = {"stage": 2, }
-    
+            
 else:
     raise KeyError
 
-if train_args['optim'] == 'AdamW':
-    optimizer = AdamW(model.parameters(), lr=train_args['learning_rate'], 
-                      weight_decay=train_args['weight_decay'], )  # max_grad_norm=train_args['max_grad_norm'])
-else:
-    optimizer = None
+# if train_args['optim'] == 'AdamW':
+#     optimizer = AdamW(model.parameters(), lr=train_args['learning_rate'], 
+#                       weight_decay=train_args['weight_decay'], )  # max_grad_norm=train_args['max_grad_norm'])
+# else:
+#     optimizer = None
     
-if train_args['lr_scheduler_type'] == 'linear':
-    lr_scheduler = get_linear_schedule_with_warmup(optimizer=optimizer, 
-                                                   num_training_steps=num_training_steps,
-                                                   num_warmup_steps=num_warmup_steps)
-else:
-    lr_scheduler = None
+# if train_args['lr_scheduler_type'] == 'linear':
+#     lr_scheduler = get_linear_schedule_with_warmup(optimizer=optimizer, 
+#                                                    num_training_steps=num_training_steps,
+#                                                    num_warmup_steps=num_warmup_steps)
+# else:
+#     lr_scheduler = None
 
 evaluators = []
 
@@ -152,10 +188,10 @@ else:
     callbacks = []
 
 trainer = Trainer(model=model, tokenizer=tokenizer, config=config,
-                  optimizer=optimizer, lr_scheduler=lr_scheduler,
-                  loss_fn=GPTLMLoss(ignore_index=0),
-                  train_dataset_collate_fn=ColliePadder(padding_token_id={"attention_mask": 0, "labels": 0}, padding_left=False),
-                  eval_dataset_collate_fn=ColliePadder(padding_token_id={"attention_mask": 0, "labels": 0}, padding_left=False),
+                #   optimizer=optimizer, lr_scheduler=lr_scheduler,
+                  loss_fn=FlashGPTLMLoss(ignore_index=1),
+                  train_dataset_collate_fn=ColliePadder(padding_token_id={"attention_mask": 1, "labels": 1}, padding_left=False),
+                  eval_dataset_collate_fn=ColliePadder(padding_token_id={"attention_mask": 1, "labels": 1}, padding_left=False),
                   train_dataset=train_dataset, evaluators=evaluators, 
                   monitors=[LossMonitor(config), LRMonitor(config), TGSMonitor(config), MemoryMonitor(config), ], 
                   callbacks=callbacks)
