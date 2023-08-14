@@ -133,15 +133,15 @@ class EvaluatorForExtrapolation(Evaluator):
         else:
             outputs = evaluator.engine(**batch)
         
-        ppl = torch.exp(auto_param_call(evaluator.loss_fn, {**outputs},
+        ppl = torch.exp(auto_param_call(evaluator.loss_fn, {**batch, **outputs},
                                         signature_fn=evaluator.loss_fn.forward if isinstance(evaluator.loss_fn, nn.Module) else evaluator.loss_fn))
-        # seq_len = torch.sum((batch['labels'] != 0).int(), dim=-1) - 1
-        logits = outputs.get('logits')[:-1, :].contiguous()
-        target = outputs.get('labels')[1:].cuda().contiguous()
+        seq_len = torch.sum((batch['labels'] != 1).int(), dim=-1)
+        logits = outputs.get('logits')[..., :-1, :].contiguous()
+        target = batch['labels'][..., 1:].cuda().contiguous()
         pred = torch.max(logits, dim=-1)[1]
 
         return {
             'target': target.detach().cuda(), 'pred': pred.detach().cuda(),
-            'ppl': ppl.detach().clone().view(1,).cuda(),  # 'seq_len': seq_len.cuda(), 
+            'ppl': ppl.detach().clone().view(1,).cuda(), 'seq_len': seq_len.cuda(), 
         }
-        
+

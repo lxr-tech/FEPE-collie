@@ -51,8 +51,8 @@ if model_args['size'] == '330M':
     train_length = train_args['max_length']
     test_lengths = [512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192, 9216, 10240, ]
 
-    train_path = 'arxiv-train-{}-{}.pkl'.format(model_args['size'], train_args['max_length'])
-    test_path = 'arxiv-test-{}-{}.pkl'.format(model_args['size'], test_lengths[-1])
+    train_path = 'arxiv-train-llama-{}.pkl'.format(train_args['max_length'])
+    test_path = 'arxiv-test-llama-{}.pkl'.format(test_lengths[-1])
 
     from utils.clm_tools_arxiv import get_arxiv_for_perplexity
     tokenizer, train_dataset, test_datasets = get_arxiv_for_perplexity(tokenizer=tokenizer, 
@@ -62,8 +62,8 @@ elif model_args['size'] == '3B':
     train_length = train_args['max_length']
     test_lengths = [1024, 2048, 4096, 6144, 8192, 10240, 12288, 14336, 16384, 18432, 20480, ]
 
-    train_path = 'pile-train-{}-{}.pkl'.format(model_args['size'], train_args['max_length'])
-    test_path = 'pile-test-{}-{}-books3.pkl'.format(model_args['size'], test_lengths[-1])
+    train_path = 'pile-train-llama-{}.pkl'.format(train_args['max_length'])
+    test_path = 'books-test-llama-{}.pkl'.format(test_lengths[-1])
 
     from utils.clm_tools_pile import get_pile_for_perplexity
     num_training_data = int((3 * 1024 * 1024 * 1024) / train_length)  # 1572864

@@ -3,11 +3,11 @@ import argparse
 
 import torch
 
-from configs.clm_train_config import model_args, train_args
-
 def arg_parse():
     
     parser = argparse.ArgumentParser(description='define pe fp config')
+    
+    parser.add_argument('--task', type=str, default='pretrain', choices=['pretrain', 'finetune', 'validate'])
 
     parser.add_argument('--dim', type=str, default='2d', choices=['2d', '1d'])
     parser.add_argument('--exp', type=str, default='rope', choices=['rope', 'xpos'])
@@ -16,6 +16,9 @@ def arg_parse():
     
     parser.add_argument('--log_base', type=float, default=torch.e)
     parser.add_argument('--exp_base', type=float, default=512.)
+    
+    parser.add_argument('--ntk_option', type=str, default='none', choices=['none', 'fixed', 'dynamic'])
+    parser.add_argument('--ntk_alpha', type=float, default=8.)
 
     # parser.add_argument('--post_norm_attn', type=str, default='false')
     # parser.add_argument('--post_norm_ffn', type=str, default='false')
@@ -31,9 +34,17 @@ def arg_parse():
     parser.add_argument('--group', type=str, default='')
 
     parser.add_argument('--max_length', type=int, default=512)
-    parser.add_argument('--model_size', type=str, default='330M', choices=['330M', '3B', '7B'])
+    parser.add_argument('--model_size', type=str, default='330M', choices=['330M', '3B', '7B', 
+                                                                           'llama-7B', 'llama2-7B'])
 
     args = parser.parse_args()
+    
+    if args.task == 'pretrain':
+        from configs.clm_train_config import model_args, train_args
+    elif args.task == 'finetune':
+        from configs.clm_tune_config import model_args, train_args
+    else:
+        raise KeyError
 
     # fp = {'fp32': torch.float32, 'fp16': torch.float16, 'bf16': torch.bfloat16}
 
@@ -42,7 +53,8 @@ def arg_parse():
 
     pe_config = {'exp': True if args.exp == 'xpos' else False, '1d': True if args.dim == '1d' else False, 
                  'imp': True if args.imp == 'imp' else False, 'log': True if args.ln == 'log' else False, 
-                 'exp_base': args.exp_base, 'log_base': args.log_base, }
+                 'exp_base': args.exp_base, 'log_base': args.log_base, 'max_length': args.max_length, 
+                 'ntk_option': args.ntk_option, 'ntk_alpha': args.ntk_alpha }
 
     # hp_config = {'init': args.post_init, 'post': args.post_norm_attn, 'both': args.post_norm_ffn, }
 

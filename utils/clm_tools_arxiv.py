@@ -26,7 +26,7 @@ def get_arxiv_for_pretrain(tokenizer, train_path, train_length):
         return torch.load(train_path)
  
     train_dataset = load_dataset('ccdv/arxiv-summarization', name='document', split='train', 
-                                cache_dir='/mnt/petrelfs/liuxiaoran/.huggingface/ccdv__arxiv-summarization')
+                                cache_dir='/mnt/petrelfs/liuxiaoran/.huggingface/datasets/ccdv__arxiv-summarization')
 
     def tokenize_function(examples):
 

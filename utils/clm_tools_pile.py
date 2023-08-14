@@ -22,7 +22,7 @@ from collie.driver.io import PetrelIODriver
 
 def get_pile_for_perplexity(train_length, test_lengths, train_path, test_path, tokenizer, num_data):
     
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained('/mnt/petrelfs/share_data/llm_llama/llama2/llama-2-7b-hf', use_fast=False)
     
     # 如何从pile路径搞定一个on-the-fly的collie-datasset，我也不清楚迭代几个epoch，但知道多少step
     
@@ -43,38 +43,17 @@ class PileDataset(torch.utils.data.Dataset):
         
         self.train_length = train_length 
         
-        self.path = 'hdd:s3://opennlplab_hdd/backup_trainig_data/train/en/pile/'
+        # self.path = 'hdd:s3://opennlplab_hdd/backup_trainig_data/train/en/pile/'
         
-        datafiles = sorted(list(filter(lambda x: x.endswith(".bin"), PetrelIODriver.walk(self.path))))
-
-        self.len, self.indices = 0, []
         self.cur_file_name, self.cache = None, None
         
-        if os.path.exists(train_path):
-            self.indices = torch.load(train_path)
-            self.len = len(self.indices)
-        else:
-            for datafile in datafiles:
-                datafile, metafile = self.path + datafile, self.path + datafile + '.meta'
-                if PetrelIODriver.exists(metafile):
-                    meta = np.load(PetrelIODriver.load_buffer(metafile))
-                    self.len += meta.shape[0]
-                    self.indices.extend([{'file': datafile, 'offset': sample[0]} for sample in meta])
-                else:
-                    buffer = StringIO(PetrelIODriver.load(datafile, 'r'))
-                    offset = 0
-                    self.indices.append({'file': datafile, 'offset': offset})
-                    for line in buffer.readlines():
-                        offset += len(line)
-                        self.indices.append({'file': datafile, 'offset': offset})
-                        self.len += 1
-                    self.indices.pop(-1)
-            torch.save(self.indices, train_path)
-            
+        self.file_indices = torch.load('/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/pile-train-llama.pkl')
+        self.data_indices = torch.load(train_path)
+        self.len = len(self.data_indices)
+                    
         self.len = num_data if num_data >= 0 else self.len + 1 + num_data
         
-        self.token_buffer, self.index_buffer, self.seqlen = [], [], []
-        self.pivot, self.real_len = env.dp_rank, len(self.indices)
+        self.pivot, self.real_len = env.dp_rank, len(self.file_indices)
             
         if env.local_rank == 0:
             print("pretrain data num =", self.len, ", while the real num =", self.real_len)
@@ -84,34 +63,42 @@ class PileDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, _):
         
-        while len(self.token_buffer) < self.train_length:
-            self.pivot = (self.pivot + env.dp_size) % self.real_len
-            datadict = self.indices[self.pivot]
-            if self.cur_file_name is None or self.cache is None or self.cur_file_name != datadict['file']:
-                self.cur_file_name, self.cache = datadict['file'], StringIO(PetrelIODriver.load(datadict['file'], mode='r'))
-            self.cache.seek(datadict['offset'])
-            sample = json.loads(self.cache.readline())    
-            self.token_buffer.extend(sample['tokens'])
-            self.index_buffer.extend(range(len(sample['tokens'])))
-            self.seqlen.append(len(sample['tokens']))
+        datadict = self.file_indices[self.data_indices[self.pivot]]
+        self.pivot = (self.pivot + env.dp_size) % self.len
+
+        if self.cur_file_name is None or self.cache is None or self.cur_file_name != datadict['file']:
+            self.cur_file_name, self.cache = datadict['file'], StringIO(PetrelIODriver.load(datadict['file'], mode='r'))
+        self.cache.seek(datadict['offset'])
+        sample = json.loads(self.cache.readline())
+        input_ids = sample['tokens'][:self.train_length]
+        
+        return {"input_ids": torch.tensor(input_ids).long(), "labels": torch.tensor(input_ids).long(), }  # 
             
-        input_ids = self.token_buffer[:self.train_length]
-        index_ids = self.index_buffer[:self.train_length]
+        # while len(self.token_buffer) < self.train_length:
+        #     self.pivot = (self.pivot + env.dp_size) % self.real_len
+        #     datadict = self.indices[self.pivot]
+        #     if self.cur_file_name is None or self.cache is None or self.cur_file_name != datadict['file']:
+        #         self.cur_file_name, self.cache = datadict['file'], StringIO(PetrelIODriver.load(datadict['file'], mode='r'))
+        #     self.cache.seek(datadict['offset'])
+        #     sample = json.loads(self.cache.readline())    
+        #     self.token_buffer.extend(sample['tokens'])
+        #     self.index_buffer.extend(range(len(sample['tokens'])))
+        #     self.seqlen.append(len(sample['tokens']))
+            
+        # input_ids = self.token_buffer[:self.train_length]
+        # index_ids = self.index_buffer[:self.train_length]
         
-        seqlen = self.seqlen
-        extra_length = len(self.token_buffer) - self.train_length
-        seqlen[-1] -= extra_length
+        # seqlen = self.seqlen
+        # extra_length = len(self.token_buffer) - self.train_length
+        # seqlen[-1] -= extra_length
 
-        self.index_buffer = []
-        self.index_buffer.extend(range(extra_length))
-        self.seqlen = [] if extra_length == 0 else [extra_length]
-        self.token_buffer = self.token_buffer[self.train_length:]
+        # self.index_buffer = []
+        # self.index_buffer.extend(range(extra_length))
+        # self.seqlen = [] if extra_length == 0 else [extra_length]
+        # self.token_buffer = self.token_buffer[self.train_length:]
 
-        assert len(self.token_buffer) == len(self.index_buffer)
-        
-        return {"input_ids": torch.tensor(input_ids).long(),  # "labels": torch.tensor(input_ids).long(),
-                "index_ids": torch.tensor(index_ids).long(), "seqlen": torch.tensor(seqlen).long()}  # 
- 
+        # assert len(self.token_buffer) == len(self.index_buffer)
+         
 
 def get_book_for_evaluate(test_path, test_lengths):
 
