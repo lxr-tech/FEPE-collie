@@ -13,18 +13,17 @@ from transformers import get_cosine_schedule_with_warmup, get_linear_schedule_wi
 # sys.path.append('../collie/')
 
 from collie import CollieConfig, Trainer, env
-from collie import PPLMetric, AccuracyMetric, GPTLMLoss
 from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonitor
-from collie import ColliePadder, CheckpointCallback
+from collie import ColliePadder, CheckpointCallback, GPTLMLoss
 
 from models.collie_llama_with_pe import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
-from utils.clm_tools_acc import EvaluatorForExtrapolation
+from utils.clm_tools_acc import EvaluatorForExtrapolation, CumGPTLMLoss, CumPPLMetric, CumAccMetric
 
-tag, group, pe_config, model_args, train_args = arg_parse()
+tag, group, task, pe_config, model_args, train_args = arg_parse()
 
-config = CollieConfig.from_pretrained('decapoda-research/llama-7b-hf')
+config = CollieConfig.from_pretrained('/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/')
 
 assert config.model_config.hidden_size == model_args['hidden_size']
 assert config.model_config.intermediate_size == model_args['intermediate_size']
@@ -57,7 +56,7 @@ config.ds_config = {
         'enabled': True,
         'tag': tag,
         'wandb': {
-            'enabled': True,
+            'enabled': task['training'],
             'team': 'xrliu',
             'project': 'fepe_collie',
             'group': group
@@ -77,18 +76,28 @@ config.__setattr__('file_name', file_name)
 
 tokenizer = model_args['tokenizer']
 
-model = LlamaForCausalLM.from_pretrained(# model_path_or_name='/mnt/petrelfs/share_data/llm_llama/llama2/llama-2-7b-hf/',  
-                                         model_path_or_name='decapoda-research/llama-7b-hf',
-                                         # cache_dir='/mnt/petrelfs/liuxiaoran/.huggingface/transformers/decapoda-research__llama-7b-hf', 
-                                         config=config)
+if task['training']:
+    if task['pretrain']:
+        model = LlamaForCausalLM.from_config(config=config)
+    else:
+        model_path_or_name = '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/'
+        model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, config=config)
+    assert env.world_size == train_args['world_size']
+else:
+    if tag.__contains__('rope_inv_2d_raw'):
+        model_path_or_name = '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/'  # in a100 cluster
+        # model_path_or_name = '/mnt/petrelfs/share_data/llm_llama/llama2/llama-2-7b-hf/',  # in s cluster
+    else:
+        model_path_or_name = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/checkpoints/{}-{}/epoch_1'.format(group, tag[:15])
+    model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, config=config)
 
 rank = env.rank  #  int(os.environ["rank"])
 
-# assert env.world_size == train_args['world_size']
-
 if model_args['size'] in ['llama-7B', 'llama2-7B']:
     train_length = train_args['max_length']
-    test_lengths = [1024, 2048, 4096, 6144, 8192, 10240, 12288, 14336, 16384, 18432, 20480, ]
+    test_lengths = [2048, 4096, 6144, 8192, 10240, 12288, 14336, 16384, 18432, 20480, 
+                    22528, 24576, 26624, 28672, 30720, 32768, ]
+    # test_lengths = [1024, 2048, 4096, 6144, 8192, 10240, 12288, 14336, 16384, 18432, 20480, ]
 
     train_path = 'pile-train-llama-{}.pkl'.format(train_args['max_length'])
     test_path = 'books3-test-llama-{}.pkl'.format(test_lengths[-1])
@@ -125,11 +134,12 @@ else:
 
 evaluators = []
 
-for item in test_datasets:
-    evaluators.append(EvaluatorForExtrapolation(model=model, dataset=test_datasets[item], 
-                                                config=config, monitors=[EvalMonitor(config) ], 
-                                                metrics={'{}'.format(item): AccuracyMetric(gather_result=True), 
-                                                         '{}#ppl'.format(item): PPLMetric(gather_result=True)}))
+item = str(max(test_lengths))
+evaluators.append(EvaluatorForExtrapolation(model=model, dataset=test_datasets[item], monitors=[EvalMonitor(config) ], 
+                                            config=config, loss_fn=CumGPTLMLoss(max_len=max(test_lengths), ignore_index=1), 
+                                            dynamic_enabled=(pe_config['ntk_option'] == 'dynamic'), dynamic_stride=512,
+                                            metrics={'cum#acc': CumAccMetric(gather_result=True), 
+                                                     'cum#ppl': CumPPLMetric(gather_result=True)}))
 
 model_size = sum([param.nelement() for param in model.parameters()]) / 1e6
 
@@ -168,10 +178,10 @@ if env.rank == 0:
     file.close()
 
 try:
-    if tag.__contains__('rope_inv_2d_raw') or pe_config['ntk_option'] != 'none':
-        trainer.eval()
-    else:
+    if task['training']:
         trainer.train()
+    else:
+        trainer.eval()
 except BaseException as e:
     import sys
     import traceback

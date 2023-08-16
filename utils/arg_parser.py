@@ -7,7 +7,8 @@ def arg_parse():
     
     parser = argparse.ArgumentParser(description='define pe fp config')
     
-    parser.add_argument('--task', type=str, default='pretrain', choices=['pretrain', 'finetune', 'validate'])
+    parser.add_argument('--task_a', type=str, default='pretrain', choices=['pretrain', 'finetune'])
+    parser.add_argument('--task_b', type=str, default='training', choices=['training', 'testing'])
 
     parser.add_argument('--dim', type=str, default='2d', choices=['2d', '1d'])
     parser.add_argument('--exp', type=str, default='rope', choices=['rope', 'xpos'])
@@ -18,7 +19,7 @@ def arg_parse():
     parser.add_argument('--exp_base', type=float, default=512.)
     
     parser.add_argument('--ntk_option', type=str, default='none', choices=['none', 'fixed', 'dynamic'])
-    parser.add_argument('--ntk_alpha', type=float, default=8.)
+    parser.add_argument('--ntk_alpha', type=float, default=1.)
 
     # parser.add_argument('--post_norm_attn', type=str, default='false')
     # parser.add_argument('--post_norm_ffn', type=str, default='false')
@@ -39,12 +40,14 @@ def arg_parse():
 
     args = parser.parse_args()
     
-    if args.task == 'pretrain':
+    if args.task_a == 'pretrain':
         from configs.clm_train_config import model_args, train_args
-    elif args.task == 'finetune':
+    elif args.task_a == 'finetune':
         from configs.clm_tune_config import model_args, train_args
     else:
         raise KeyError
+    
+    task = {'pretrain': args.task_a == 'pretrain', 'training': args.task_b == 'training'}
 
     # fp = {'fp32': torch.float32, 'fp16': torch.float16, 'bf16': torch.bfloat16}
 
@@ -68,6 +71,6 @@ def arg_parse():
 
     model_arg, train_arg = model_args[model_size], train_args[(model_size, max_length)]
 
-    return tag, group, pe_config, model_arg, train_arg  # fp_config, hp_config
+    return tag, group, task, pe_config, model_arg, train_arg  # fp_config, hp_config
 
 

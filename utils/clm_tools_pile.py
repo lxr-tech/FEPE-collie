@@ -22,7 +22,7 @@ from collie.driver.io import PetrelIODriver
 
 def get_pile_for_perplexity(train_length, test_lengths, train_path, test_path, tokenizer, num_data):
     
-    tokenizer = AutoTokenizer.from_pretrained('/mnt/petrelfs/share_data/llm_llama/llama2/llama-2-7b-hf', use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained('/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/', use_fast=False)
     
     # 如何从pile路径搞定一个on-the-fly的collie-datasset，我也不清楚迭代几个epoch，但知道多少step
     
@@ -64,6 +64,8 @@ class PileDataset(torch.utils.data.Dataset):
     def __getitem__(self, _):
         
         datadict = self.file_indices[self.data_indices[self.pivot]]
+        datadict['file'] = datadict['file'].replace('hdd:s3://opennlplab_hdd/backup_trainig_data/train/en/pile/', 
+                                                    'p_ssd:s3://P_model_weights/liuxiaoran/backup_trainig_data/train/en/pile/')
         self.pivot = (self.pivot + env.dp_size) % self.len
 
         if self.cur_file_name is None or self.cache is None or self.cur_file_name != datadict['file']:
@@ -105,7 +107,8 @@ def get_book_for_evaluate(test_path, test_lengths):
     if os.path.exists(test_path):
         return torch.load(test_path)
     
-    path = 'hdd:s3://opennlplab_hdd/backup_trainig_data/valid/en/pile_Books3/val.bin'
+    path = 'p_ssd:s3://P_model_weights/liuxiaoran/backup_trainig_data/valid/en/pile_Books3/val.bin'
+    # path = 'hdd:s3://opennlplab_hdd/backup_trainig_data/valid/en/pile_Books3/val.bin'
     assert PetrelIODriver.exists(path + '.meta')
     meta = np.load(PetrelIODriver.load_buffer(path + '.meta'))
     data = StringIO(PetrelIODriver.load(path, mode='r'))
@@ -115,7 +118,7 @@ def get_book_for_evaluate(test_path, test_lengths):
         indices = torch.load(test_path + '.meta')
     else:
         for sample in meta:
-            if sample[1] >= test_lengths[-1]:
+            if sample[1] >= max(test_lengths):
                 indices.append({'offset': sample[0]})
         torch.save(indices, test_path + '.meta')
 
@@ -123,15 +126,15 @@ def get_book_for_evaluate(test_path, test_lengths):
     for datadict in indices:
         data.seek(datadict['offset'])
         sample = json.loads(data.readline())
-        dataset.append({'input_ids': torch.tensor(sample['tokens'][:test_lengths[0]]).long(), 
-                        'labels': torch.tensor(sample['tokens'][:test_lengths[0]]).long(), })
+        dataset.append({'input_ids': torch.tensor(sample['tokens'][:max(test_lengths)]).long(), 
+                        'labels': torch.tensor(sample['tokens'][:max(test_lengths)]).long(), })
     dataset = Dataset.from_list(dataset)
     
     if env.local_rank == 0:
         print("evaluate data num =", len(dataset))
 
     test_datasets = {}
-    for length in test_lengths:
+    for length in sorted(test_lengths, reverse=True):
         print(length)
         dataset = dataset.map(lambda instance: {'input_ids': instance['input_ids'][:length],
                                                 'labels': instance['input_ids'][:length]})

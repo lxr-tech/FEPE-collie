@@ -55,20 +55,23 @@ class RotaryPositionEmbedding(nn.Module):
         
         if self.pe_config['imp']:
             order, beta = 3,  1 / math.log(10000.0)  # 0.10856
-            start, end = math.pow(0.0005, 1 / order), math.pow(0.9999, 1 / order)  # 
+            start, end = np.power(0.0005, 1 / order), np.power(0.9999, 1 / order)  # 
             if self.pe_config['1d']:
                 omega = np.power(np.linspace(start, end, head_dim), order)
             else:
                 omega = np.power(np.linspace(start, end, head_dim // 2), order)
                 omega = np.stack([omega, omega], axis=-1).reshape((head_dim))
                 # omega = np.concatenate([omega, omega], axis=-1)
-            omega = omega[None, None, None, ::-1]
+            omega = omega[None, None, None, ::-1].copy()
             expos = (beta / omega) / (1/order * np.power(omega, 1/order - 1))
         else:
+            alpha = self.pe_config['ntk_alpha'] if self.pe_config['ntk_option'] == 'fixed' else 1
             if self.pe_config['1d']:
-                omega = 1.0 / (10000.0 ** (np.arange(0, head_dim, 1) / head_dim))
+                base = 10000.0 * alpha ** (self.head_dim / (self.head_dim - 1))
+                omega = 1.0 / (base ** (np.arange(0, head_dim, 1) / head_dim))
             else:
-                omega = 1.0 / (10000.0 ** (np.arange(0, head_dim, 2) / head_dim))
+                base = 10000.0 * alpha ** (self.head_dim / (self.head_dim - 2))
+                omega = 1.0 / (base ** (np.arange(0, head_dim, 2) / head_dim))
                 omega = np.stack([omega, omega], axis=-1).reshape((head_dim))
                 # omega = np.concatenate([omega, omega], axis=-1)
             omega = omega[None, None, None, :]
@@ -100,25 +103,21 @@ class RotaryPositionEmbedding(nn.Module):
         # batch_size, seq_len, n_head (fixed for tp), head_dim 
         
         t = torch.arange(seq_len, device=query.device).reshape(1, -1, 1, 1).float()
-        if self.pe_config['ntk_option'] == 'none':
-            theta = self.omega.float() * t
-            sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos.float()
-        elif self.pe_config['ntk_option'] == 'fixed': 
-            if self.pe_config['imp'] or self.pe_config['1d']:
-                raise KeyError('ntk for imp and 1d is not currently supported')
-            alpha = 10000.0 * self.pe_config['ntk_alpha'] ** (self.head_dim / (self.head_dim - 2))
-            theta = 1.0 / (alpha ** (torch.arange(0, self.head_dim, 2, device='cuda') / self.head_dim)).float()
-            theta = torch.stack([theta, theta], axis=-1).reshape((1, 1, 1, self.head_dim))
-            theta = theta * t
-            sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos.float()
-        elif self.pe_config['ntk_option'] == 'dynamic': 
-            if self.pe_config['imp'] or self.pe_config['1d']:
-                raise KeyError('ntk for imp and 1d is not currently supported')
-            alpha = 10000.0 * (self.pe_config['ntk_alpha'] * (t / self.pe_config['max_length'] - 1).clip(min=0) + 1) ** (self.head_dim / (self.head_dim - 2))
-            theta = 1.0 / (alpha ** (torch.arange(0, self.head_dim, 2, device='cuda') / self.head_dim)).float()
-            theta = torch.stack([theta, theta], axis=-1).reshape((1, seq_len, 1, self.head_dim))
-            theta = theta * t
-            sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos.float()
+        if self.pe_config['ntk_option'] == 'dynamic': 
+            if self.pe_config['imp']:
+                raise KeyError('ntk for imp is not currently supported')
+            # copy from https://huggingface.co/Qwen/Qwen-7B/blob/main/modeling_qwen.py#L379
+            base = max(2 ** math.ceil(math.log(seq_len / self.pe_config['max_length'], 2) + 1) - 1, 1)
+            alpha = 10000.0 * base ** (self.head_dim / (self.head_dim - (1 if self.pe_config['1d'] else 2)))
+            theta = 1.0 / (alpha ** (torch.arange(0, self.head_dim, 1 if self.pe_config['1d'] else 2, 
+                                                  device='cuda') / self.head_dim)).float()
+            theta = theta if self.pe_config['1d'] else torch.stack([theta, theta], axis=-1).reshape((self.head_dim))
+            theta = theta[None, None, None, :]
+            self.scale = (torch.clamp(-torch.log(theta)/math.log(10000.0), max=1) + 0.4) / 1.4
+        else:
+            theta = self.omega.float()
+        theta = theta * t
+        sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos.float()
 
         q, k = query.float() * expos, key.float() * expos
 
@@ -306,7 +305,7 @@ class LlamaLayer(nn.Module):
                              .reshape(batch_size, self.num_key_value_heads,
                                       seq_len + start_pos, -1)
             new_layer_past = torch.stack((present_key, value.permute([0, 2, 1, 3])), dim=0)
-        attention_mask = attention_mask if attention_mask is not None else torch.ones((query.shape[0], query.shape[1])).to(hidden_states.device)
+        attention_mask = attention_mask if attention_mask is not None else torch.ones((query.shape[0], query.shape[1]), device='cuda')
         if self.config.use_flash:
             output = flash_attention(query, key, value, attention_mask, softmax_scale=1/math.sqrt(self.head_dim), half=self.config.pe_config['1d'])
         else:

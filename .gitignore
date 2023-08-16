@@ -12,4 +12,4 @@ hdd_new:s3:/
 
 nohup_logs/
 nohup.out
-traceback.log
+traceback*
