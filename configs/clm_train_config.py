@@ -1,16 +1,15 @@
 
 model_args = {
     '330M': {
-        'size': '330M', 'tokenizer': 'openlm-research/open_llama_7b',  # 'decapoda-research/llama-7b-hf', # "vocab_size": 32000
+        'size': '330M', 'model_path_or_name': '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/', # "vocab_size": 32000
         'hidden_size': 1024, 'intermediate_size': 4096, 'num_attention_heads': 16, 'num_hidden_layers': 16,
     },
     '3B': {
-        'size': '3B', 'tokenizer': 'openlm-research/open_llama_7b',  # 'openlm-research/open_llama_3b', # "vocab_size": 32000
-        # originally, hidden_size 3200 -> 3072, intermediate_size is 8640 -> 9216
+        'size': '3B', 'model_path_or_name': '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/',  # "vocab_size": 32000
         'hidden_size': 3072, 'intermediate_size': 9216, 'num_attention_heads': 32, 'num_hidden_layers': 26,
     },
     '7B': {
-        'size': '7B', 'tokenizer': 'openlm-research/open_llama_7b',  # 'openlm-research/open_llama_7b', # "vocab_size": 32000
+        'size': '7B', 'model_path_or_name': '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/',  # "vocab_size": 32000
         'hidden_size': 4096, 'intermediate_size': 11008, 'num_attention_heads': 32, 'num_hidden_layers': 32,
     },
 }

@@ -30,7 +30,7 @@ config.model_config.intermediate_size = model_args['intermediate_size']
 config.model_config.num_attention_heads = model_args['num_attention_heads']
 config.model_config.num_hidden_layers = model_args['num_hidden_layers']
 config.model_config.use_cache = False
-tokenizer = model_args['tokenizer']
+tokenizer = model_args['model_path_or_name']
 
 config.init_method = lambda x: torch.nn.init.normal_(x, mean=0., std=0.002) if x.ndim == 2 else torch.nn.init.ones_(x)
 config.seed = 42

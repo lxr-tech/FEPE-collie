@@ -76,7 +76,7 @@ file_name = './csv_logs/{}-{}.txt'.format(group, tag)
     
 config.__setattr__('file_name', file_name)
 
-tokenizer = model_args['tokenizer']
+tokenizer = model_args['model_path_or_name']
 
 model = LlamaForCausalLM.from_config(config=config)
 
@@ -118,7 +118,7 @@ elif model_args['size'] == '3B':
     print(num_training_steps, num_warmup_steps, train_args['warmup_ratio'])
             
 else:
-    raise KeyError
+    sys.exit()
 
 if train_args['optim'] == 'AdamW':
     optimizer = AdamW(model.parameters(), lr=train_args['learning_rate'], 

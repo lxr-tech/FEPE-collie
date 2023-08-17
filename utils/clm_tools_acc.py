@@ -119,7 +119,7 @@ class EvaluatorForExtrapolation(Evaluator):
         if env.rank == 0:
             file = open(self.config.file_name, 'a')
             for key, value in metric_results.items():
-                file.write("\t'{}': {}, \n".format(key, value))
+                file.write('\t"{}": {}, \n'.format(key, value))
             file.write('\n')
             file.close()
 

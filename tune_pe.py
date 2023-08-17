@@ -23,12 +23,12 @@ from utils.clm_tools_acc import EvaluatorForExtrapolation, CumGPTLMLoss, CumPPLM
 
 tag, group, task, pe_config, model_args, train_args = arg_parse()
 
-config = CollieConfig.from_pretrained('/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/')
+config = CollieConfig.from_pretrained(model_args['model_path_or_name'])
 
-assert config.model_config.hidden_size == model_args['hidden_size']
-assert config.model_config.intermediate_size == model_args['intermediate_size']
-assert config.model_config.num_attention_heads == model_args['num_attention_heads']
-assert config.model_config.num_hidden_layers == model_args['num_hidden_layers']
+# assert config.model_config.hidden_size == model_args['hidden_size']
+# assert config.model_config.intermediate_size == model_args['intermediate_size']
+# assert config.model_config.num_attention_heads == model_args['num_attention_heads']
+# assert config.model_config.num_hidden_layers == model_args['num_hidden_layers']
 
 config.model_config.use_cache = False
 config.checkpointing = True
@@ -74,26 +74,24 @@ file_name = './csv_logs/{}-{}.txt'.format(group, tag)
     
 config.__setattr__('file_name', file_name)
 
-tokenizer = model_args['tokenizer']
+tokenizer = model_args['model_path_or_name']
 
 if task['training']:
     if task['pretrain']:
         model = LlamaForCausalLM.from_config(config=config)
     else:
-        model_path_or_name = '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/'
-        model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, config=config)
-    assert env.world_size == train_args['world_size']
+        model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_args['model_path_or_name'], config=config)
+    # assert env.world_size == train_args['world_size']
 else:
     if tag.__contains__('rope_inv_2d_raw'):
-        model_path_or_name = '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/'  # in a100 cluster
-        # model_path_or_name = '/mnt/petrelfs/share_data/llm_llama/llama2/llama-2-7b-hf/',  # in s cluster
+        model_path_or_name = model_args['model_path_or_name']
     else:
         model_path_or_name = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/checkpoints/{}-{}/epoch_1'.format(group, tag[:15])
     model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, config=config)
 
 rank = env.rank  #  int(os.environ["rank"])
 
-if model_args['size'] in ['llama-7B', 'llama2-7B']:
+if model_args['size'] in ['llama2-7B', 'llama2-13B']:
     train_length = train_args['max_length']
     test_lengths = [2048, 4096, 6144, 8192, 10240, 12288, 14336, 16384, 18432, 20480, 
                     22528, 24576, 26624, 28672, 30720, 32768, ]
@@ -114,7 +112,7 @@ if model_args['size'] in ['llama-7B', 'llama2-7B']:
         train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
             
 else:
-    raise KeyError
+    sys.exit()
 
 if train_args['optim'] == 'AdamW':
     optimizer = AdamW(model.parameters(), lr=train_args['learning_rate'])  # max_grad_norm=train_args['max_grad_norm'])
@@ -152,8 +150,8 @@ if rank == 0:
     print(config, '\n')
 
 if not group.__contains__('rand') and not group.__contains__('debug'):
-    callbacks = [CheckpointCallback(folder='checkpoints/{}-{}'.format(group, tag), model_only=True, 
-                                    every_n_epochs=train_args['save_every_n_epochs'])]
+    callbacks = [CheckpointCallback(folder='p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/{}-{}'.format(group, tag), model_only=True, 
+                                    every_n_epochs=train_args['save_every_n_epochs'], protocol='petrel')]
 else:
     callbacks = []
 

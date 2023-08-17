@@ -1,7 +1,7 @@
 
 import argparse
-
 import torch
+import sys
 
 def arg_parse():
     
@@ -36,7 +36,7 @@ def arg_parse():
 
     parser.add_argument('--max_length', type=int, default=512)
     parser.add_argument('--model_size', type=str, default='330M', choices=['330M', '3B', '7B', 
-                                                                           'llama-7B', 'llama2-7B'])
+                                                                           'llama2-7B', 'llama2-13B'])
 
     args = parser.parse_args()
     
@@ -45,7 +45,7 @@ def arg_parse():
     elif args.task_a == 'finetune':
         from configs.clm_tune_config import model_args, train_args
     else:
-        raise KeyError
+        sys.exit()
     
     task = {'pretrain': args.task_a == 'pretrain', 'training': args.task_b == 'training'}
 
