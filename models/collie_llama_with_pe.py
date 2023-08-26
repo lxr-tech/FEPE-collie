@@ -75,7 +75,7 @@ class RotaryPositionEmbedding(nn.Module):
                 omega = np.stack([omega, omega], axis=-1).reshape((head_dim))
                 # omega = np.concatenate([omega, omega], axis=-1)
             omega = omega[None, None, None, :] / self.pe_config['pi_lambda']
-            expos = np.ones_like(omega)
+            expos = np.ones_like(omega) * np.log(self.pe_config['base']) / np.log(10000.0)
         self.register_buffer("omega", torch.tensor(omega), persistent=False)
         self.register_buffer("expos", torch.tensor(np.sqrt(expos)), persistent=False)
 

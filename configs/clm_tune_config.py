@@ -1,7 +1,7 @@
 
 model_args = {
     'llama2-7B': {
-        'size': 'llama2-7B', 'model_path_or_name': '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/',  # "vocab_size": 32000
+        'size': 'llama2-7B', 'model_path_or_name': '/mnt/petrelfs/share_data/llm_llama/llama2/llama-2-7b-hf/',  # "vocab_size": 32000
         'hidden_size': 4096, 'intermediate_size': 11008, 'num_attention_heads': 32, 'num_hidden_layers': 32,
     },    
     'llama2-13B': {
@@ -11,6 +11,7 @@ model_args = {
 }
 
 # '/mnt/petrelfs/share_data/llm_llama/llama2/llama-2-7b-hf/',  # in s cluster
+# '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/',  # in s cluster
 
 
 train_args = {

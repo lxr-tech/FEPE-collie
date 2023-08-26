@@ -22,7 +22,7 @@ from collie.driver.io import PetrelIODriver
 
 def get_pile_for_perplexity(train_length, test_lengths, train_path, test_path, tokenizer, num_data):
     
-    tokenizer = AutoTokenizer.from_pretrained('/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/', use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer, use_fast=False)
     
     # 如何从pile路径搞定一个on-the-fly的collie-datasset，我也不清楚迭代几个epoch，但知道多少step
     
