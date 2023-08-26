@@ -67,14 +67,14 @@ class RotaryPositionEmbedding(nn.Module):
         else:
             alpha = self.pe_config['ntk_alpha'] if self.pe_config['ntk_option'] == 'fixed' else 1
             if self.pe_config['1d']:
-                base = 10000.0 * alpha ** (self.head_dim / (self.head_dim - 1))
+                base = self.pe_config['base'] * alpha ** (self.head_dim / (self.head_dim - 1))
                 omega = 1.0 / (base ** (np.arange(0, head_dim, 1) / head_dim))
             else:
-                base = 10000.0 * alpha ** (self.head_dim / (self.head_dim - 2))
+                base = self.pe_config['base'] * alpha ** (self.head_dim / (self.head_dim - 2))
                 omega = 1.0 / (base ** (np.arange(0, head_dim, 2) / head_dim))
                 omega = np.stack([omega, omega], axis=-1).reshape((head_dim))
                 # omega = np.concatenate([omega, omega], axis=-1)
-            omega = omega[None, None, None, :]
+            omega = omega[None, None, None, :] / self.pe_config['pi_lambda']
             expos = np.ones_like(omega)
         self.register_buffer("omega", torch.tensor(omega), persistent=False)
         self.register_buffer("expos", torch.tensor(np.sqrt(expos)), persistent=False)
@@ -84,7 +84,7 @@ class RotaryPositionEmbedding(nn.Module):
                 scale = - np.log(omega) / np.log(10000.0) * head_dim
             else:
                 scale = np.arange(0, head_dim, 1 if self.pe_config['1d'] else 2)
-                scale = scale if self.pe_config['1d'] else np.concatenate([scale, scale], axis=-1)
+                scale = scale if self.pe_config['1d'] else np.stack([scale, scale], axis=-1).reshape((head_dim))  # np.concatenate([scale, scale], axis=-1)
                 scale = scale[None, None, None, :]
             scale = (scale + 0.4 * head_dim) / (1.4 * head_dim)
             self.register_buffer("scale", torch.tensor(scale), persistent=False)

@@ -20,6 +20,12 @@ train_args = {
         'lr_scheduler_type': 'none', 'train_steps': 1024, 'warmup_steps': 2,
         'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 1,
     },
+    ('llama2-7B', 8192): {        
+        'max_length': 4096, 'world_size': 32, 'train_micro_batch_size': 2, 'eval_batch_size': 2, 
+        'optim': 'AdamW', 'learning_rate': 0.00002, 'max_grad_norm': 2.5, 'weight_decay': 0, 
+        'lr_scheduler_type': 'none', 'train_steps': 1024, 'warmup_steps': 2,
+        'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 1,
+    },
     ('llama2-13B', 4096): {        
         'max_length': 4096, 'world_size': 32, 'train_micro_batch_size': 4, 'eval_batch_size': 2, 
         'optim': 'AdamW', 'learning_rate': 0.00002, 'max_grad_norm': 2.5, 'weight_decay': 0, 

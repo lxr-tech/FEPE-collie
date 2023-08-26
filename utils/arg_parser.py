@@ -18,6 +18,9 @@ def arg_parse():
     parser.add_argument('--log_base', type=float, default=torch.e)
     parser.add_argument('--exp_base', type=float, default=512.)
     
+    parser.add_argument('--base', type=float, default=10000.)
+    parser.add_argument('--pi_lambda', type=float, default=1.)
+
     parser.add_argument('--ntk_option', type=str, default='none', choices=['none', 'fixed', 'dynamic'])
     parser.add_argument('--ntk_alpha', type=float, default=1.)
 
@@ -56,8 +59,8 @@ def arg_parse():
 
     pe_config = {'exp': True if args.exp == 'xpos' else False, '1d': True if args.dim == '1d' else False, 
                  'imp': True if args.imp == 'imp' else False, 'log': True if args.ln == 'log' else False, 
-                 'exp_base': args.exp_base, 'log_base': args.log_base, 'max_length': args.max_length, 
-                 'ntk_option': args.ntk_option, 'ntk_alpha': args.ntk_alpha }
+                 'base': args.base, 'exp_base': args.exp_base, 'log_base': args.log_base, 'max_length': args.max_length, 
+                 'ntk_option': args.ntk_option, 'ntk_alpha': args.ntk_alpha, 'pi_lambda': args.pi_lambda, }
 
     # hp_config = {'init': args.post_init, 'post': args.post_norm_attn, 'both': args.post_norm_ffn, }
 
