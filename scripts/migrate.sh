@@ -27,14 +27,11 @@ p_sk="2kQa41IjD34XPZMPITNyuTbrqDemNeA7Bzrb0q9O"  # 2kQa41IjD34XPZMPITNyuTbrqDemN
 # src="s3://${s_ak}:${s_sk}@opennlplab_hdd.10.140.14.251:80/backup_trainig_data/train/en/pile/"
 # dst="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/liuxiaoran/backup_trainig_data/train/en/pile/"  # in .7.251 out .3.251
 
-# src="/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/checkpoints/pjlab_fepe_llama2_7B_4096-rope_inv_2d_raw_1000/"
-# dst="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/liuxiaoran/FEPE-collie/checkpoints/pjlab_fepe_llama2_7B_4096-hang_1000/"  # in .7.251 out .3.251
+src="/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/checkpoints/"
+dst="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/liuxiaoran/FEPE-collie/checkpoints/"  # in .7.251 out .3.251
 
-src="s3://${p_ak}:${p_sk}@P_model_weights.10.135.7.251:80/liuxiaoran/FEPE-collie/checkpoints/pjlab_fepe_llama2_7B_4096-rope_inv_2d_raw_500/"  # in .7.251 out .3.251
-dst="s3://${s_ak}:${s_sk}@model_weights.10.140.2.254:80/liuxiaoran/FEPE-collie/checkpoints/pjlab_fepe_llama2_7B_4096-rope_inv_2d_raw_500/"
-
-# src="s3://${s_ak}:${s_sk}@model_weights.10.140.14.254:80/0331/5177_pj_v4_labelsm_v2_cn_qa_mixv6/4999/"
-# dst="s3://${p_ak}:${p_sk}@checkpoints_ssd_02.10.135.3.249:80/0331/5177_pj_v4_labelsm_v2_cn_qa_mixv6/4999/"
+# src="s3://${p_ak}:${p_sk}@P_model_weights.10.135.7.251:80/liuxiaoran/FEPE-collie/checkpoints/pjlab_fepe_llama2_7B_4096-rope_inv_2d_raw_500/"  # in .7.251 out .3.251
+# dst="s3://${s_ak}:${s_sk}@model_weights.10.140.2.254:80/liuxiaoran/FEPE-collie/checkpoints/pjlab_fepe_llama2_7B_4096-rope_inv_2d_raw_500/"
 
 # Execute the rclone sync command with the given options
 /mnt/petrelfs/share_data/zhangshuo/sensesync --listers=50 --threads=50 cp "$src" "$dst"

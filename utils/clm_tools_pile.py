@@ -162,21 +162,27 @@ class DummyDataset(torch.utils.data.Dataset):
 
 if __name__ == "__main__":
     
-    import sentencepiece as spm
-    tokenizer = spm.SentencePieceProcessor()
-    tokenizer.load('/mnt/petrelfs/share_data/yanhang/tokenizes/llama.model')
+    # import sentencepiece as spm
+    # tokenizer = spm.SentencePieceProcessor()
+    # tokenizer.load('/mnt/petrelfs/share_data/yanhang/tokenizes/llama.model')
     
-    dataset = PileDataset(train_path='/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/pile-train-3B-2048.pkl', 
-                          train_length=2048, num_data=3)
-    sample = dataset[0]
-    print(sample['cu_seqlens'])
-    text = tokenizer.decode_ids(sample['input_ids'][sample['cu_seqlens'][1]:sample['cu_seqlens'][2]].tolist())
-    print(text)
-    sample = dataset[0]
-    print(sample['cu_seqlens'])
-    text = tokenizer.decode_ids(sample['input_ids'][sample['cu_seqlens'][0]:sample['cu_seqlens'][1]].tolist())
-    print(text)
+    # dataset = PileDataset(train_path='/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/pile-train-3B-2048.pkl', 
+    #                       train_length=2048, num_data=3)
+    # sample = dataset[0]
+    # print(sample['cu_seqlens'])
+    # text = tokenizer.decode_ids(sample['input_ids'][sample['cu_seqlens'][1]:sample['cu_seqlens'][2]].tolist())
+    # print(text)
+    # sample = dataset[0]
+    # print(sample['cu_seqlens'])
+    # text = tokenizer.decode_ids(sample['input_ids'][sample['cu_seqlens'][0]:sample['cu_seqlens'][1]].tolist())
+    # print(text)
     
-    # test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/pile-test-3B-20480-books3.pkl'
-    # test_lengths = [20480, 18432, 16384, 14336, 12288, 10240, 8192, 6144, 4096, 2048, 1024, ]
-    # get_book_for_evaluate(test_path, test_lengths)
+    # test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/books3-test-llama-49152.pkl'
+    # test_lengths = [49152, 45056, 40960, 36864, 32768, 28672, 24576, 20480, 16384, 12288, 8192, 4096]
+    # dataset = get_book_for_evaluate(test_path, test_lengths)
+    # print(len(dataset['49152']))
+    
+    test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/books3-test-llama-65536.pkl'
+    test_lengths = [65536, 49152, 32768, 16384, 4096, ]
+    dataset = get_book_for_evaluate(test_path, test_lengths)
+    print(len(dataset['65536']))

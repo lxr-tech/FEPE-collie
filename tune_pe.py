@@ -85,9 +85,11 @@ if task['training']:
 else:
     if tag.__contains__('rope_inv_2d_raw'):
         model_path_or_name = model_args['model_path_or_name']
+        model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, config=config)
     else:
-        model_path_or_name = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/checkpoints/{}-{}/epoch_1'.format(group, tag[:15])
-    model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, config=config)
+        model_path_or_name = 'p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/{}-{}/epoch_1'.format(group, tag.split('-')[0])
+        model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, 
+                                                 protocol='petrel', config=config)
 
 rank = env.rank  #  int(os.environ["rank"])
 

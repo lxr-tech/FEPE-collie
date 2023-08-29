@@ -75,7 +75,7 @@ class RotaryPositionEmbedding(nn.Module):
                 omega = np.stack([omega, omega], axis=-1).reshape((head_dim))
                 # omega = np.concatenate([omega, omega], axis=-1)
             omega = omega[None, None, None, :] / self.pe_config['pi_lambda']
-            expos = np.ones_like(omega) * np.log(self.pe_config['base']) / np.log(10000.0)
+            expos = np.ones_like(omega)
         self.register_buffer("omega", torch.tensor(omega), persistent=False)
         self.register_buffer("expos", torch.tensor(np.sqrt(expos)), persistent=False)
 
@@ -137,7 +137,7 @@ class RotaryPositionEmbedding(nn.Module):
             k_real = k_real / scale
 
         if self.pe_config['log']:
-            q_real = q_real * torch.log(t+1) / math.log(self.pe_config['log_base'])
+            q_real = q_real * torch.clamp(torch.log(t+1) / math.log(self.pe_config['log_base']), min=self.pe_config['log_clip'])
 
         # query = torch.view_as_complex(
         #     query.float().reshape(*query.shape[:-1], -1, 2))
