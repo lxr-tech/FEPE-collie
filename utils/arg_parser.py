@@ -3,6 +3,16 @@ import argparse
 import torch
 import sys
 
+ext_dict = {
+    '10k': [10240, 9216, 8192, 7168, 6144, 5120, 4096, 3072, 2048, 1024, 512, ],
+    '20k': [20480, 18432, 16384, 14336, 12288, 10240, 8192, 6144, 4096, 2048, 1024, ],
+    '32k': [32768, 30720, 28672, 26624, 24576, 22528, 20480, 18432, 
+            16384, 14336, 12288, 10240, 8192, 6144, 4096, 2048, ],
+    '48k': [49152, 45056, 40960, 36864, 32768, 28672, 24576, 20480, 16384, 12288, 8192, 4096], 
+    '64k': [65536, 49152, 32768, 16384, 4096, ], 
+    '100k': [102400, 81920, 65536, 49152, 32768, 4096], 
+}
+
 def arg_parse():
     
     parser = argparse.ArgumentParser(description='define pe fp config')
@@ -36,11 +46,15 @@ def arg_parse():
     # parser.add_argument('--norm_fp', type=str, default='fp32', choices=['fp32', 'fp16', 'bf16'])
 
     parser.add_argument('--tag', type=str, default='')
+    parser.add_argument('--path', type=str, default='')
     parser.add_argument('--group', type=str, default='')
 
     parser.add_argument('--max_length', type=int, default=512)
     parser.add_argument('--model_size', type=str, default='330M', choices=['330M', '3B', '7B', 
                                                                            'llama2-7B', 'llama2-13B'])
+    parser.add_argument('--dataset', type=str, default='pile', choices=['arxiv', 'books3'])
+    parser.add_argument('--ext_length', type=str, default='32k', choices=['10k', '20k', '32k', 
+                                                                          '48k', '64k', '100k'])
 
     args = parser.parse_args()
     
@@ -63,19 +77,21 @@ def arg_parse():
                  'exp_base': args.exp_base, 'log_base': args.log_base, 'log_clip': args.log_clip, 
                  'max_length': args.max_length, 'pi_lambda': args.pi_lambda, 'base': args.base, 
                  'ntk_option': args.ntk_option, 'ntk_alpha': args.ntk_alpha, }
+    
+    ds_config = {'dataset': args.dataset, 'ext_lengths': ext_dict[args.ext_length], }
 
     # hp_config = {'init': args.post_init, 'post': args.post_norm_attn, 'both': args.post_norm_ffn, }
 
     model_size, max_length = args.model_size, args.max_length
 
-    assert args.tag != '' and args.group != ''
+    assert args.tag != '' and args.path != '' and args.group != ''
 
-    tag, group = args.tag, args.group
+    tag, path, group = args.tag, args.path, args.group
 
     assert model_size in model_args and (model_size, max_length) in train_args
 
     model_arg, train_arg = model_args[model_size], train_args[(model_size, max_length)]
 
-    return tag, group, task, pe_config, model_arg, train_arg  # fp_config, hp_config
+    return tag, path, group, task, pe_config, ds_config, model_arg, train_arg  # fp_config, hp_config
 
 

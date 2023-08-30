@@ -182,7 +182,12 @@ if __name__ == "__main__":
     # dataset = get_book_for_evaluate(test_path, test_lengths)
     # print(len(dataset['49152']))
     
-    test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/books3-test-llama-65536.pkl'
-    test_lengths = [65536, 49152, 32768, 16384, 4096, ]
+    # test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/books3-test-llama-65536.pkl'
+    # test_lengths = [65536, 49152, 32768, 16384, 4096, ]
+    # dataset = get_book_for_evaluate(test_path, test_lengths)
+    # print(len(dataset['65536']))
+    
+    test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/books3-test-llama-102400.pkl'
+    test_lengths = [102400, 81920, 65536, 49152, 32768, 4096]
     dataset = get_book_for_evaluate(test_path, test_lengths)
-    print(len(dataset['65536']))
+    print(len(dataset['102400']))

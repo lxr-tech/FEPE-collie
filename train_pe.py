@@ -22,7 +22,7 @@ from models.collie_llama_with_pe import LlamaForCausalLM
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation
 
-tag, group, pe_config, model_args, train_args = arg_parse()
+tag, group, task, pe_config, ds_config, model_args, train_args = arg_parse()
 
 config = CollieConfig.from_pretrained('decapoda-research/llama-7b-hf')
 config.model_config.hidden_size = model_args['hidden_size']

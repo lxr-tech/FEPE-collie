@@ -153,10 +153,17 @@ class EvaluatorForExtrapolation(Evaluator):
         if evaluator.dynamic_enabled:
             batch_size, seq_len = batch['input_ids'].shape
             logits = None
+            if evaluator.config.pp_size > 1:
+                if isinstance(evaluator.engine.module, PipelineModel):
+                    evaluator.engine.module.forward_type = "eval"
             for i in range(seq_len, 0, -evaluator.dynamic_stride):
                 if env.rank == 0:
                     logger.info(i)
-                outputs = evaluator.engine(input_ids=batch['input_ids'][..., :i])
+                if evaluator.config.pp_size > 1:
+                    outputs = evaluator.engine.module(input_ids=batch['input_ids'][..., :i], 
+                                                      labels=batch['labels'][..., :i])
+                else:
+                    outputs = evaluator.engine(input_ids=batch['input_ids'][..., :i])
                 if logits is not None:
                     logits[..., :i, :] = outputs.get('logits')[..., :i, :]
                 else:

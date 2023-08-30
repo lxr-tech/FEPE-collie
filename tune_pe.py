@@ -21,7 +21,7 @@ from models.collie_llama_with_pe import LlamaForCausalLM
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation, CumGPTLMLoss, CumPPLMetric, CumAccMetric
 
-tag, group, task, pe_config, model_args, train_args = arg_parse()
+tag, path, group, task, pe_config, ds_config, model_args, train_args = arg_parse()
 
 config = CollieConfig.from_pretrained(model_args['model_path_or_name'])
 
@@ -39,6 +39,7 @@ if not group.__contains__('rand'):
     torch.cuda.manual_seed_all(config.seed)
     torch.backends.cudnn.deterministic = True
 
+config.pp_size = 4
 config.train_micro_batch_size = train_args['train_micro_batch_size']
 config.eval_batch_size = train_args['eval_batch_size']
 config.train_epochs = 1
@@ -63,9 +64,9 @@ config.ds_config = {
         }
     },
     'gradient_clipping': train_args['max_grad_norm'],
-    'zero_optimization': {
-        "stage": 3, 
-    },
+    # 'zero_optimization': {
+    #     "stage": 3, 
+    # },
 }
 
 config.__setattr__('pe_config', pe_config)
@@ -83,24 +84,22 @@ if task['training']:
         model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_args['model_path_or_name'], config=config)
     # assert env.world_size == train_args['world_size']
 else:
-    if tag.__contains__('rope_inv_2d_raw'):
+    if path in ['llama2-7B', 'llama2-13B', ]:
         model_path_or_name = model_args['model_path_or_name']
         model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, config=config)
     else:
-        model_path_or_name = 'p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/{}-{}/epoch_1'.format(group, tag.split('-')[0])
+        model_path_or_name = 'p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/pjlab_fepe_llama2_7B_4096-{}/epoch_1'.format(path)
         model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, 
                                                  protocol='petrel', config=config)
 
 rank = env.rank  #  int(os.environ["rank"])
 
-if model_args['size'] in ['llama2-7B', 'llama2-13B']:
+if ds_config['dataset'] == 'books3':
     train_length = train_args['max_length']
-    test_lengths = [2048, 4096, 6144, 8192, 10240, 12288, 14336, 16384, 18432, 20480, 
-                    22528, 24576, 26624, 28672, 30720, 32768, ]
-    # test_lengths = [1024, 2048, 4096, 6144, 8192, 10240, 12288, 14336, 16384, 18432, 20480, ]
+    test_lengths = ds_config['ext_lengths']
 
     train_path = 'pile-train-llama-{}.pkl'.format(train_args['max_length'])
-    test_path = 'books3-test-llama-{}.pkl'.format(test_lengths[-1])
+    test_path = 'books3-test-llama-{}.pkl'.format(max(test_lengths))
 
     num_training_steps, num_warmup_steps = train_args['train_steps'], train_args['warmup_steps']
     num_data = train_args['train_micro_batch_size'] * env.dp_size * num_training_steps
@@ -137,7 +136,7 @@ evaluators = []
 item = str(max(test_lengths))
 evaluators.append(EvaluatorForExtrapolation(model=model, dataset=test_datasets[item], monitors=[EvalMonitor(config) ], 
                                             config=config, loss_fn=CumGPTLMLoss(max_len=max(test_lengths), ignore_index=1), 
-                                            dynamic_enabled=(pe_config['ntk_option'] == 'dynamic'), dynamic_stride=512,
+                                            dynamic_enabled=(pe_config['ntk_option'] == 'dynamic'), dynamic_stride=train_args['max_length'],
                                             metrics={'cum#acc': CumAccMetric(gather_result=True), 
                                                      'cum#ppl': CumPPLMetric(gather_result=True)}))
 
@@ -151,8 +150,8 @@ if rank == 0:
     print(train_args, '\n')
     print(config, '\n')
 
-if not group.__contains__('rand') and not group.__contains__('debug'):
-    callbacks = [CheckpointCallback(folder='p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/{}-{}'.format(group, tag), model_only=True, 
+if task['training'] and not group.__contains__('rand') and not group.__contains__('debug'):
+    callbacks = [CheckpointCallback(folder='p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/{}-{}'.format(group, path), model_only=True, 
                                     every_n_epochs=train_args['save_every_n_epochs'], protocol='petrel')]
 else:
     callbacks = []
