@@ -212,6 +212,14 @@ class CumPPLMetric(BaseMetric):
         assert "loss" in result.keys(), f"loss not in result!"
         loss = result["loss"]
         batch_size, _ = loss.shape
+        
+        idx = len(self.loss)
+        if env.rank == 0:
+            file = open(f'./csv_logs/llama2_7B-ntk_dynamic-sample{idx}.json', 'a')
+            file.write('\t"{}": {}\n'.format('cum#ppl', loss[0].tolist()))
+            file.write("} \n")
+            file.close()
+        
         self.loss.append(loss)
         self.total.append(batch_size)
 
@@ -260,5 +268,13 @@ class CumAccMetric(BaseMetric):
         cur_acc = np.cumsum(np.equal(pred, target), axis=-1)
         batch_size, max_len = cur_acc.shape
         cur_acc = cur_acc / np.arange(1, max_len+1, 1).reshape((1, -1))
+        
+        idx = len(self.correct)
+        if env.rank == 0:
+            file = open(f'./csv_logs/llama2_7B-ntk_dynamic-sample{idx}.json', 'a')
+            file.write("{\n")
+            file.write('\t"{}": {},\n'.format('cum#acc', cur_acc[0].tolist()))
+            file.close()
+        
         self.correct.append(cur_acc)
         self.total.append(batch_size)

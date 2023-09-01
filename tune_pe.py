@@ -94,7 +94,7 @@ else:
 
 rank = env.rank  #  int(os.environ["rank"])
 
-if ds_config['dataset'] == 'books3':
+if ds_config['dataset'] == 'pile':
     train_length = train_args['max_length']
     test_lengths = ds_config['ext_lengths']
 
@@ -111,7 +111,33 @@ if ds_config['dataset'] == 'books3':
     
     tokenizer, train_dataset, test_datasets = get_pile_for_perplexity(tokenizer=tokenizer, num_data=num_data, 
         train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
-            
+    
+elif ds_config['dataset'] == 'leval':
+    assert not task['training']
+    test_lengths = ds_config['ext_lengths']
+
+    test_path = 'leval-narrative_qa-llama-{}.pkl'.format(max(test_lengths))
+
+    num_training_steps, num_warmup_steps = 0, 0
+
+    from utils.clm_tools_leval import get_leval_for_perplexity
+    
+    tokenizer, train_dataset, test_datasets = get_leval_for_perplexity(tokenizer=tokenizer, subset='narrative_qa',
+        train_length=None, train_path=None, test_lengths=test_lengths, test_path=test_path)
+
+elif ds_config['dataset'] == 'code':
+
+    train_length = train_args['max_length']
+    test_lengths = [max(ds_config['ext_lengths'])]
+
+    num_training_steps, num_warmup_steps = 0, 0
+
+    from utils.clm_tools_starcoder import get_code_for_perplexity
+    
+    tokenizer, train_dataset, test_datasets = get_code_for_perplexity(
+        train_length=train_length, test_lengths=test_lengths, train_path=None, test_path=None, 
+        tokenizer=tokenizer, langs=['csharp', 'java', 'python', ])
+
 else:
     sys.exit()
 

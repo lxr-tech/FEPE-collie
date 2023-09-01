@@ -7,32 +7,34 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 
 
-def get_arxiv_for_perplexity(train_length, test_lengths, train_path, test_path, tokenizer):
+def get_code_for_perplexity(train_length, lang, test_lengths, train_path, test_path, tokenizer):
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer, use_fast=False)
+    assert lang in ['python', 'csharp', 'java']
 
     train_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/{}'.format(train_path)
-    train_dataset = get_arxiv_for_pretrain(tokenizer=tokenizer, train_path=train_path, train_length=train_length)
+    train_dataset = get_code_for_pretrain(tokenizer=tokenizer, lang=lang, 
+                                          train_path=train_path, train_length=train_length)
     
     test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/{}'.format(test_path)
-    test_datasets = get_arxiv_for_evaluate(tokenizer=tokenizer, test_path=test_path, test_lengths=test_lengths)
+    test_datasets = get_code_for_evaluate(tokenizer=tokenizer, lang=lang, 
+                                          test_path=test_path, test_lengths=test_lengths)
 
     return tokenizer, train_dataset, test_datasets
 
 
-def get_arxiv_for_pretrain(tokenizer, train_path, train_length):
+def get_code_for_pretrain(tokenizer, lang, train_path, train_length):
 
     if os.path.exists(train_path):
         return torch.load(train_path)
  
-    train_dataset = load_dataset('ccdv/arxiv-summarization', name='document', split='train', 
-                                cache_dir='/mnt/petrelfs/liuxiaoran/.huggingface/datasets/ccdv__arxiv-summarization')
+    train_dataset = load_dataset(f'microsoft/LCC_{lang}', split='train')
 
     def tokenize_function(examples):
+        return tokenizer(examples['context'], max_length=train_length, truncation=True)
 
-        return tokenizer(examples['article'], max_length=train_length, truncation=True)
-
-    train_dataset = train_dataset.map(tokenize_function, batched=True, remove_columns=['article', 'abstract'])
+    train_dataset = train_dataset.map(tokenize_function, batched=True, remove_columns=['context', 'gt'])
+    train_dataset = train_dataset.filter(lambda x: len(x['input_ids']) >= train_length)
     train_dataset = train_dataset.map(lambda instance: {'input_ids': instance['input_ids'][:train_length],
                                                         'attention_mask': instance['attention_mask'][:train_length],
                                                         'labels': instance['input_ids'][:train_length]})
@@ -43,19 +45,18 @@ def get_arxiv_for_pretrain(tokenizer, train_path, train_length):
     return train_dataset
 
 
-def get_arxiv_for_evaluate(tokenizer, test_path, test_lengths):
+def get_code_for_evaluate(tokenizer, lang, test_path, test_lengths):
 
     if os.path.exists(test_path):
         return torch.load(test_path)
 
-    test_dataset = load_dataset('ccdv/arxiv-summarization', name='document', split='test', 
-                                cache_dir='/mnt/petrelfs/liuxiaoran/.huggingface/ccdv__arxiv-summarization')
+    test_dataset = load_dataset(f'microsoft/LCC_{lang}', split='validation')
 
     def tokenize_function(examples):
-        return tokenizer(examples['article'], max_length=test_lengths[-1], truncation=True)
+        return tokenizer(examples['context'], max_length=max(test_lengths), truncation=True)
 
-    test_dataset = test_dataset.map(tokenize_function, batched=True, remove_columns=['article', 'abstract'])
-    test_dataset = test_dataset.filter(lambda x: len(x['input_ids']) >= test_lengths[-1])
+    test_dataset = test_dataset.map(tokenize_function, batched=True, remove_columns=['context', 'gt'])
+    test_dataset = test_dataset.filter(lambda x: len(x['input_ids']) >= max(test_lengths))
     
     print('num_data', len(test_dataset), 'len_data', len(test_dataset[0]['input_ids']))
 
@@ -73,11 +74,13 @@ def get_arxiv_for_evaluate(tokenizer, test_path, test_lengths):
 
 
 if __name__ == "__main__":
-    train_length = 2048
-    test_lengths = [512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192, 9216, 10240, ]
-    train_path = 'arxiv-train-{}-{}.pkl'.format('330M', train_length)
-    test_path = 'arxiv-test-{}-{}.pkl'.format('330M', test_lengths[-1])
+    train_length = 4096
+    test_lengths = [102400, 81920, 65536, 49152, 32768, 4096]
+    lang = 'csharp'  # ['python', 'csharp', 'java']
+    train_path = 'lcc-{}-train-{}-{}.pkl'.format(lang, 'llama', train_length)
+    test_path = 'lcc-{}-valid-{}-{}.pkl'.format(lang, 'llama', max(test_lengths))
 
-    tokenizer, train_dataset, test_datasets = get_arxiv_for_perplexity(tokenizer='openlm-research/open_llama_7b', 
+    tokenizer, train_dataset, test_datasets = get_code_for_perplexity(
+        tokenizer='/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/', lang=lang, 
         train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
 
