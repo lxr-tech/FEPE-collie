@@ -57,7 +57,7 @@ config.ds_config = {
         'enabled': True,
         'tag': tag,
         'wandb': {
-            'enabled': task['training'],
+            'enabled': False,  # task['training'],
             'team': 'xrliu',
             'project': 'fepe_collie',
             'group': group
