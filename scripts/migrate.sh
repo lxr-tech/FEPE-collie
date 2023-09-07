@@ -29,12 +29,12 @@ p_sk="2kQa41IjD34XPZMPITNyuTbrqDemNeA7Bzrb0q9O"  # vGnnSeXhByGRHF1JtnSvNCVwHpGEM
 
 # dst="/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/"
 # src="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/liuxiaoran/FEPE-collie/caches/"  # in .7.251 out .3.251
-# dst="/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/csv_logs/"
-# src="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/liuxiaoran/FEPE-collie/csv_logs/"  # in .7.251 out .3.251
+src="/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/csv_logs/"
+dst="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/liuxiaoran/FEPE-collie/csv_logs/"  # in .7.251 out .3.251
 
 # src="/mnt/petrelfs/share_data/llm_llama/llama2/llama-2-13b-hf/"
-src="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/llm_model/llm_llama2/llama-2-13b-hf/"
-dst="/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-13b-hf/"
+# src="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/llm_model/llm_llama2/llama-2-13b-hf/"
+# dst="/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-13b-hf/"
 
 # src="s3://${p_ak}:${p_sk}@P_model_weights.10.135.7.251:80/liuxiaoran/FEPE-collie/checkpoints/pjlab_fepe_llama2_7B_4096-rope_inv_2d_raw_500/"  # in .7.251 out .3.251
 # dst="s3://${s_ak}:${s_sk}@model_weights.10.140.2.254:80/liuxiaoran/FEPE-collie/checkpoints/pjlab_fepe_llama2_7B_4096-rope_inv_2d_raw_500/"

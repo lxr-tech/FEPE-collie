@@ -108,7 +108,7 @@ class RotaryPositionEmbedding(nn.Module):
                 raise KeyError('ntk for imp is not currently supported')
             # copy from https://huggingface.co/Qwen/Qwen-7B/blob/main/modeling_qwen.py#L379
             base = max(2 ** math.ceil(math.log(seq_len / self.pe_config['max_length'], 2) + 1) - 1, 1)
-            alpha = 10000.0 * base ** (self.head_dim / (self.head_dim - (1 if self.pe_config['1d'] else 2)))
+            alpha = self.pe_config['base'] * base ** (self.head_dim / (self.head_dim - (1 if self.pe_config['1d'] else 2)))
             theta = 1.0 / (alpha ** (torch.arange(0, self.head_dim, 1 if self.pe_config['1d'] else 2, 
                                                   device='cuda') / self.head_dim)).float()
             theta = theta if self.pe_config['1d'] else torch.stack([theta, theta], axis=-1).reshape((self.head_dim))

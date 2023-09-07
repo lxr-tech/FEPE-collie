@@ -6,6 +6,7 @@ caches/
 
 wandb/
 csv_logs/
+csv_monitor/
 
 test_model/
 hdd_new:s3:/

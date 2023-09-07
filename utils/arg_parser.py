@@ -48,6 +48,8 @@ def arg_parse():
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--path', type=str, default='')
     parser.add_argument('--group', type=str, default='')
+    
+    parser.add_argument('--pp_size', type=int, default=1)
 
     parser.add_argument('--max_length', type=int, default=512)
     parser.add_argument('--model_size', type=str, default='330M', choices=['330M', '3B', '7B', 
@@ -86,12 +88,12 @@ def arg_parse():
 
     assert args.tag != '' and args.path != '' and args.group != ''
 
-    tag, path, group = args.tag, args.path, args.group
+    tag, path, group, pp_size = args.tag, args.path, args.group, args.pp_size
 
     assert model_size in model_args and (model_size, max_length) in train_args
 
     model_arg, train_arg = model_args[model_size], train_args[(model_size, max_length)]
 
-    return tag, path, group, task, pe_config, ds_config, model_arg, train_arg  # fp_config, hp_config
+    return tag, path, group, pp_size, task, pe_config, ds_config, model_arg, train_arg  # fp_config, hp_config
 
 

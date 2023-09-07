@@ -7,7 +7,7 @@ from torch.optim import AdamW
 
 from datetime import datetime
 
-from transformers import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
+from transformers import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 
 # import sys
 # sys.path.append('../collie/')
@@ -21,7 +21,7 @@ from models.collie_llama_with_pe import LlamaForCausalLM
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation, CumGPTLMLoss, CumPPLMetric, CumAccMetric
 
-tag, path, group, task, pe_config, ds_config, model_args, train_args = arg_parse()
+tag, path, group, pp_size, task, pe_config, ds_config, model_args, train_args = arg_parse()
 
 config = CollieConfig.from_pretrained(model_args['model_path_or_name'])
 
@@ -39,8 +39,9 @@ if not group.__contains__('rand'):
     torch.cuda.manual_seed_all(config.seed)
     torch.backends.cudnn.deterministic = True
 
-config.pp_size = 4
-config.train_micro_batch_size = train_args['train_micro_batch_size']
+config.pp_size = pp_size
+config.train_micro_batch_size = train_args['train_micro_batch_size'] // pp_size if task['training'] else train_args['train_micro_batch_size'] 
+config.gradient_accumulation_steps = pp_size if task['training'] else 1
 config.eval_batch_size = train_args['eval_batch_size']
 config.train_epochs = 1
 config.eval_per_n_epochs = train_args['eval_per_n_epochs']
@@ -52,21 +53,22 @@ config.ds_config = {
     'bf16': {
         'enabled': True,
     },
-    'train_micro_batch_size_per_gpu': config.train_micro_batch_size * config.gradient_accumulation_steps,
+    'train_micro_batch_size_per_gpu': config.train_micro_batch_size,  # * config.gradient_accumulation_steps,
     'monitor_config': {
         'enabled': True,
         'tag': tag,
-        'wandb': {
-            'enabled': False,  # task['training'],
-            'team': 'xrliu',
-            'project': 'fepe_collie',
-            'group': group
+        'csv_monitor': {  # wandb
+            'enabled': task['training'],
+            'output_path': '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/csv_monitor/'
+            # 'team': 'xrliu',
+            # 'project': 'fepe_collie',
+            # 'group': group
         }
     },
     'gradient_clipping': train_args['max_grad_norm'],
-    # 'zero_optimization': {
-    #     "stage": 3, 
-    # },
+    'zero_optimization': {
+        "stage": 3 if pp_size == 1 else 0, 
+    },
 }
 
 config.__setattr__('pe_config', pe_config)
@@ -88,7 +90,7 @@ else:
         model_path_or_name = model_args['model_path_or_name']
         model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, config=config)
     else:
-        model_path_or_name = 'p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/pjlab_fepe_llama2_7B_4096-{}/epoch_1'.format(path)
+        model_path_or_name = 'p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/pjlab_fepe_{}_4096-{}/epoch_1'.format(model_args['size'].replace('-', '_'), path)
         model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, 
                                                  protocol='petrel', config=config)
 
@@ -154,6 +156,9 @@ elif train_args['lr_scheduler_type'] == 'WarmupDecayLR':
     lr_scheduler = get_linear_schedule_with_warmup(optimizer=optimizer, 
                                                    num_training_steps=num_training_steps,
                                                    num_warmup_steps=num_warmup_steps)
+elif train_args['lr_scheduler_type'] == 'ConstantWarmup':
+    lr_scheduler = get_constant_schedule_with_warmup(optimizer=optimizer, 
+                                                     num_warmup_steps=num_warmup_steps)
 else:
     lr_scheduler = None
 
