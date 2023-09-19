@@ -116,7 +116,7 @@ class EvaluatorForExtrapolation(Evaluator):
                 "mode": "eval"})
         self.metric_wrapper.reset()
         
-        if env.rank == 0:
+        if env.rank == 0 and self.config.file_name is not None:
             file = open(self.config.file_name, 'a')
             for key, value in metric_results.items():
                 file.write('\t"{}": {}, \n'.format(key, value))

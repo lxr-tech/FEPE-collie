@@ -1,4 +1,6 @@
 *.pyc
+*.jpg
+*.json
 __pycache__
 
 checkpoints/
@@ -7,6 +9,7 @@ caches/
 wandb/
 csv_logs/
 csv_monitor/
+gen_monitor/
 
 test_model/
 hdd_new:s3:/

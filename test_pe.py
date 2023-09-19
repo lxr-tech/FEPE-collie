@@ -1,6 +1,6 @@
 
-import os
-import math
+import json
+import numpy as np
 
 import torch
 from torch.optim import AdamW
@@ -16,7 +16,7 @@ from collie import CollieConfig, Trainer, env
 from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonitor
 from collie import ColliePadder, CheckpointCallback, GPTLMLoss
 
-from models.collie_llama_with_pe import LlamaForCausalLM
+from models.collie_llama_with_pe2 import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation, CumGPTLMLoss, CumPPLMetric, CumAccMetric
@@ -73,10 +73,8 @@ config.ds_config = {
 }
 
 config.__setattr__('pe_config', pe_config)
-
-file_name = './csv_logs/{}-{}.txt'.format(group, tag)
     
-config.__setattr__('file_name', file_name)
+config.__setattr__('file_name', None)
 
 tokenizer = model_args['model_path_or_name']
 
@@ -197,17 +195,6 @@ trainer = Trainer(model=model, tokenizer=tokenizer, config=config,
                   monitors=[LossMonitor(config), LRMonitor(config), TGSMonitor(config), MemoryMonitor(config), ], 
                   callbacks=callbacks)
 
-if env.rank == 0:
-    file = open(file_name, 'a')
-    file.write(str(datetime.now()) + '\n\n')
-    file.write('model type : {} , model size : {}M \n'.format(tag, model_size))
-    file.write('{}\n'.format(pe_config))
-    file.write('{}\n'.format(model_args))
-    file.write('{}\n'.format(train_args))
-    file.write('{}\n\n'.format(config))
-    file.write("'{}': {}\n".format(tag, '{'))
-    file.close()
-
 try:
     if task['training']:
         trainer.train()
@@ -226,7 +213,16 @@ except BaseException as e:
     raise e
 
 if env.rank == 0:
-    file = open(file_name, 'a')
-    file.write('}\n\n')
-    file.close()
+    json_dct = {}
+    i = config.model_config.num_hidden_layers - 1
+    
+    qk_dict = model.model.layers[-1].qk_dict
+    
+    for label in ['qk1_a', 'qk1_b', 'qk1_o', 'q1k_a', 'q1k_b', 'q1k_o', ]:  # label
+        
+        json_dct[f'{label}_layer{i}_avg'] = qk_dict[f'{label}_layer{i}_avg1']
+        json_dct[f'{label}_layer{i}_std'] = \
+            (qk_dict[f'{label}_layer{i}_avg2'] - torch.square(qk_dict[f'{label}_layer{i}_avg1']))
+        json_dct[f'{label}_layer{i}_std'] = torch.sqrt(json_dct[f'{label}_layer{i}_std'])
 
+    torch.save(json_dct, f'/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/csv_logs/{group}-{tag}.pkl')

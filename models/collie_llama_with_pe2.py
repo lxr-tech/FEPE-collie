@@ -3,6 +3,7 @@
 import os
 import gc
 import json
+import datetime
 
 import numpy as np
 
@@ -33,18 +34,8 @@ from collections import OrderedDict
 from transformers.modeling_utils import dtype_byte_size
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
 
-
-"""
-pe_config = {'ntk_option': 'none' or 'fixed' or 'dynamic'
-             'ntk_alpha': 8.0 (used when 'ntk_option' is 'fixed')
-             'base': 10000.0 (default) or 1000.0 (for hang_1000) or 500.0 (for hang_500)
-             'max_length': 4096 (for llama2)
-             }
-             
-config.__setattr__('pe_config', pe_config)
-
-model = LlamaForCausalLM.from_pretrained(xxx, config=config)
-"""
+# {'exp': True if args.exp == 'xpos' else False, '1d': True if args.dim == '1d' else False, 
+#  'imp': True if args.imp == 'imp' else False, 'log': True if args.log == 'log' else False, }
 
 
 def rotate_half(x):
@@ -62,12 +53,47 @@ class RotaryPositionEmbedding(nn.Module):
         self.head_dim = head_dim
         
         # batch_size, seq_len, n_head (fixed for tp), head_dim 
-        alpha = self.pe_config['ntk_alpha'] if self.pe_config['ntk_option'] == 'fixed' else 1
-        base = self.pe_config['base'] * alpha ** (self.head_dim / (self.head_dim - 2))
-        omega = 1.0 / (base ** (np.arange(0, head_dim, 2) / head_dim))
-        omega = np.stack([omega, omega], axis=-1).reshape((head_dim))
-        omega = omega[None, None, None, :]
+        
+        if self.pe_config['imp']:
+            order, beta = 3,  1 / math.log(10000.0)  # 0.10856
+            start, end = np.power(0.0005, 1 / order), np.power(0.9999, 1 / order)  # 
+            if self.pe_config['1d']:
+                omega = np.power(np.linspace(start, end, head_dim), order)
+            else:
+                omega = np.power(np.linspace(start, end, head_dim // 2), order)
+                omega = np.stack([omega, omega], axis=-1).reshape((head_dim))
+                # omega = np.concatenate([omega, omega], axis=-1)
+            omega = omega[None, None, None, ::-1].copy()
+            expos = (beta / omega) / (1/order * np.power(omega, 1/order - 1))
+        else:
+            alpha = self.pe_config['ntk_alpha'] if self.pe_config['ntk_option'] == 'fixed' else 1
+            if self.pe_config['1d']:
+                base = self.pe_config['base'] * alpha ** (self.head_dim / (self.head_dim - 1))
+                omega = 1.0 / (base ** (np.arange(0, head_dim, 1) / head_dim))
+            else:
+                base = self.pe_config['base'] * alpha ** (self.head_dim / (self.head_dim - 2))
+                omega = 1.0 / (base ** (np.arange(0, head_dim, 2) / head_dim))
+                omega = np.stack([omega, omega], axis=-1).reshape((head_dim))
+                # omega = np.concatenate([omega, omega], axis=-1)
+            omega = omega[None, None, None, :] / self.pe_config['pi_lambda']
+            expos = np.ones_like(omega)
         self.register_buffer("omega", torch.tensor(omega), persistent=False)
+        self.register_buffer("expos", torch.tensor(np.sqrt(expos)), persistent=False)
+
+        if self.pe_config['exp']:
+            if self.pe_config['imp']:
+                scale = - np.log(omega) / np.log(10000.0) * head_dim
+            else:
+                scale = np.arange(0, head_dim, 1 if self.pe_config['1d'] else 2)
+                scale = scale if self.pe_config['1d'] else np.stack([scale, scale], axis=-1).reshape((head_dim))
+                # scale = scale if self.pe_config['1d'] else np.concatenate([scale, scale], axis=-1)
+                scale = scale[None, None, None, :]
+            scale = (scale + 0.4 * head_dim) / (1.4 * head_dim)
+            self.register_buffer("scale", torch.tensor(scale), persistent=False)
+
+        # inv_freq = 1.0 / (10000.0 ** (
+        #     torch.arange(0, head_dim, 2)[: (head_dim // 2)].float() / head_dim))
+        # self.register_buffer('inv_freq', inv_freq)
 
     def forward(self,
                 query: torch.Tensor,
@@ -80,11 +106,14 @@ class RotaryPositionEmbedding(nn.Module):
         
         t = torch.arange(seq_len, device=query.device).reshape(1, -1, 1, 1).float()
         if self.pe_config['ntk_option'] == 'dynamic': 
+            if self.pe_config['imp']:
+                raise KeyError('ntk for imp is not currently supported')
             # copy from https://huggingface.co/Qwen/Qwen-7B/blob/main/modeling_qwen.py#L379
             base = max(2 ** math.ceil(math.log(seq_len / self.pe_config['max_length'], 2) + 1) - 1, 1)
-            alpha = 10000.0 * base ** (self.head_dim / (self.head_dim - 2))
-            theta = 1.0 / (alpha ** (torch.arange(0, self.head_dim, 2, device='cuda') / self.head_dim)).float()
-            theta = torch.stack([theta, theta], axis=-1).reshape((self.head_dim))
+            alpha = self.pe_config['base'] * base ** (self.head_dim / (self.head_dim - (1 if self.pe_config['1d'] else 2)))
+            theta = 1.0 / (alpha ** (torch.arange(0, self.head_dim, 1 if self.pe_config['1d'] else 2, 
+                                                  device='cuda') / self.head_dim)).float()
+            theta = theta if self.pe_config['1d'] else torch.stack([theta, theta], axis=-1).reshape((self.head_dim))
             theta = theta[None, None, None, :]
             self.scale = (torch.clamp(-torch.log(theta)/math.log(10000.0), max=1) + 0.4) / 1.4
         else:
@@ -94,9 +123,23 @@ class RotaryPositionEmbedding(nn.Module):
 
         q, k = query.float() * expos, key.float() * expos
 
-        q_real = q * cos + rotate_half(q) * sin
-        k_real = k * cos + rotate_half(k) * sin
-        # q_imag = q * sin - rotate_half(q) * cos
+        if self.pe_config['1d']:
+            q_real = torch.cat([q * cos, q * sin], dim=-1)
+            k_real = torch.cat([k * cos, k * sin], dim=-1)
+            # q_imag = torch.cat([q * sin, -q * cos], dim=-1)
+        else:
+            q_real = q * cos + rotate_half(q) * sin
+            k_real = k * cos + rotate_half(k) * sin
+            # q_imag = q * sin - rotate_half(q) * cos
+            
+        if self.pe_config['exp']:
+            scale = self.scale ** ((t - seq_len // 2) / self.pe_config['exp_base'])
+            scale = scale if not self.pe_config['1d'] else torch.cat([scale, scale], dim=-1)
+            q_real = q_real * scale
+            k_real = k_real / scale
+
+        if self.pe_config['log']:
+            q_real = q_real * torch.clamp(torch.log(t+1) / math.log(self.pe_config['log_base']), min=self.pe_config['log_clip'])
 
         # query = torch.view_as_complex(
         #     query.float().reshape(*query.shape[:-1], -1, 2))
@@ -215,12 +258,27 @@ class LlamaLayer(nn.Module):
         # 务必保持变量名一致
         self.use_cache = self.config.model_config.use_cache
         self.hidden_states = None
+        
+        if self.idx == self.config.model_config.num_hidden_layers - 1:
+            
+            dim = config.model_config.hidden_size // config.model_config.num_attention_heads
+            cut = np.log(4096 / 2 / np.pi) / np.log(10000)  # last period covered by train length
+            cut = int(np.ceil(cut * dim / 2) * 2)
+
+            self.qk_dict = {'enabled': True, 'num_data': 0, 'cut_dim': cut}
+
+            i = config.model_config.num_hidden_layers - 1
+            for label in ['qk1_a', 'qk1_b', 'qk1_o', 'q1k_a', 'q1k_b', 'q1k_o', ]:  # label
+                self.qk_dict[f'{label}_layer{i}_avg1'] = torch.zeros((102400, config.model_config.num_attention_heads))
+                self.qk_dict[f'{label}_layer{i}_avg2'] = torch.zeros((102400, config.model_config.num_attention_heads))
 
     def _forward(self, 
                  hidden_states: torch.Tensor,
                  attention_mask: Optional[torch.Tensor] = None,
                  past_key_values: Optional[torch.Tensor] = None,
                  **kwargs):
+        # logger.info('layer start')
+        # pre_time = datetime.datetime.now()
         if not self.training:
             self.hidden_states = hidden_states
         else:
@@ -236,34 +294,120 @@ class LlamaLayer(nn.Module):
         query, key, value = rearrange(query, "b n (h d) -> b n h d", d=self.head_dim), \
             rearrange(key, "b n (h d) -> b n h d", d=self.head_dim), \
             rearrange(value, "b n (h d) -> b n h d", d=self.head_dim)
+        # cur_time = datetime.datetime.now()
+        # logger.info('qkv count over, {}'.format(cur_time - pre_time))
+        # pre_time = cur_time            
         if layer_past is not None:
-            start_pos = layer_past[0].shape[2]
+            # start_pos = layer_past[0].shape[2]
+            start_pos = layer_past[0].shape[1]
         else:
             start_pos = 0
-        query, key = self.self_attn["rotary_emb"](query, key, seq_len, start_pos)
         if self.num_key_value_groups > 1:
             key = torch.repeat_interleave(key, dim=2, repeats=self.num_key_value_groups)
             value = torch.repeat_interleave(value, dim=2, repeats=self.num_key_value_groups)
         if layer_past is not None:
             # past_key: batch_size, num_heads, seq_len, head_dim
-            past_key = layer_past[0].reshape(*layer_past[0].shape[:-1], 2, -1)\
-                                    .permute(0, 2, 1, 4, 3) \
-                                    .reshape(batch_size, start_pos,
-                                             self.num_key_value_heads, -1)
-            query = torch.cat([past_key, query], dim=1)
-            key = torch.cat([past_key, key], dim=1)
-            value = torch.cat([layer_past[1].permute([0, 2, 1, 3]), value], dim=1)
+            # past_key = layer_past[0].reshape(*layer_past[0].shape[:-1], 2, -1)\
+            #                         .permute(0, 2, 1, 4, 3) \
+            #                         .reshape(batch_size, start_pos,
+            #                                  self.num_key_value_heads, -1)
+            # query = torch.cat([past_key, query], dim=1)
+            # key = torch.cat([past_key, key], dim=1)
+            # value = torch.cat([layer_past[1].permute([0, 2, 1, 3]), value], dim=1)
+            query = torch.cat([layer_past[0], query], dim=1)
+            key = torch.cat([layer_past[0], key], dim=1)
+            value = torch.cat([layer_past[1], value], dim=1)
         new_layer_past = None
         if self.use_cache and not self.training:
             # 调整成和 hf 兼容的格式，方便 prefix tuning
-            present_key = key.reshape(*key.shape[:-1], -1, 2) \
-                             .permute(0, 2, 1, 4, 3) \
-                             .reshape(batch_size, self.num_key_value_heads,
-                                      seq_len + start_pos, -1)
-            new_layer_past = torch.stack((present_key, value.permute([0, 2, 1, 3])), dim=0)
+            # present_key = key.reshape(*key.shape[:-1], -1, 2) \
+            #                  .permute(0, 2, 1, 4, 3) \
+            #                  .reshape(batch_size, self.num_key_value_heads,
+            #                           seq_len + start_pos, -1)
+            # new_layer_past = torch.stack((present_key, value.permute([0, 2, 1, 3])), dim=0)
+            new_layer_past = (key, value)
+        # cur_time = datetime.datetime.now()
+        # logger.info('qkv cache over, {}'.format(cur_time - pre_time))
+        # pre_time = cur_time            
+        query, key = self.self_attn["rotary_emb"](query, key, start_pos + seq_len)
+
+        if not self.training and self.idx == self.config.model_config.num_hidden_layers - 1 \
+            and env.dp_rank == 0 and self.qk_dict['enabled'] == True:
+            qk_dict = self.qk_dict
+            add_num_data = query.shape[0]
+            pre_num_data = qk_dict['num_data']
+            cur_num_data = qk_dict['num_data'] + add_num_data
+            cut_dim = qk_dict['cut_dim']
+            
+            last_query_a, last_query_b = query[:, -1, :, :cut_dim], query[:, -1, :, cut_dim:]
+            key_a, key_b = key[:, :, :, :cut_dim], key[:, :, :, cut_dim:]
+            qk_a = torch.einsum('bnd,bsnd->bsn', last_query_a, key_a).detach() / math.sqrt(self.head_dim)
+            qk_b = torch.einsum('bnd,bsnd->bsn', last_query_b, key_b).detach() / math.sqrt(self.head_dim)
+            qk_o = qk_a + qk_b
+            
+            if self.config.pe_config['ntk_option'] != 'dynamic':
+                for data, label in [(qk_a, 'q1k_a'), (qk_b, 'q1k_b'), (qk_o, 'q1k_o'), ]:  
+                    qk_dict[f'{label}_layer{self.idx}_avg1'] = (
+                        qk_dict[f'{label}_layer{self.idx}_avg1'] * (pre_num_data / cur_num_data)
+                        + torch.mean(data, dim=0).float().cpu() * (add_num_data / cur_num_data)
+                    )
+                    qk_dict[f'{label}_layer{self.idx}_avg2'] = (
+                        qk_dict[f'{label}_layer{self.idx}_avg2'] * (pre_num_data / cur_num_data)
+                        + torch.mean(torch.square(data), dim=0).float().cpu() * (add_num_data / cur_num_data)
+                    )
+            else:
+                start, end = seq_len - self.config.pe_config['max_length'], seq_len
+                for data, label in [(qk_a, 'q1k_a'), (qk_b, 'q1k_b'), (qk_o, 'q1k_o'), ]: 
+                    qk_dict[f'{label}_layer{self.idx}_avg1'][start:end] = (
+                        qk_dict[f'{label}_layer{self.idx}_avg1'][start:end] * (pre_num_data / cur_num_data)
+                        + torch.mean(data, dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
+                    )
+                    qk_dict[f'{label}_layer{self.idx}_avg2'][start:end] = (
+                        qk_dict[f'{label}_layer{self.idx}_avg2'][start:end] * (pre_num_data / cur_num_data)
+                        + torch.mean(torch.square(data), dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
+                    )             
+
+            query_a, query_b = query[:, :, :, :cut_dim], query[:, :, :, cut_dim:]
+            first_key_a, first_key_b = key[:, 0, :, :cut_dim], key[:, 0, :, cut_dim:]
+            qk_a = torch.einsum('bnd,bsnd->bsn', first_key_a, query_a).detach() / math.sqrt(self.head_dim)
+            qk_b = torch.einsum('bnd,bsnd->bsn', first_key_b, query_b).detach() / math.sqrt(self.head_dim)
+            qk_o = qk_a + qk_b
+            
+            if self.config.pe_config['ntk_option'] != 'dynamic':
+                for data, label in [(qk_a, 'qk1_a'), (qk_b, 'qk1_b'), (qk_o, 'qk1_o'), ]: 
+                    qk_dict[f'{label}_layer{self.idx}_avg1'] = (
+                        qk_dict[f'{label}_layer{self.idx}_avg1'] * (pre_num_data / cur_num_data)
+                        + torch.mean(data, dim=0).float().cpu() * (add_num_data / cur_num_data)
+                    )
+                    qk_dict[f'{label}_layer{self.idx}_avg2'] = (
+                        qk_dict[f'{label}_layer{self.idx}_avg2'] * (pre_num_data / cur_num_data)
+                        + torch.mean(torch.square(data), dim=0).float().cpu() * (add_num_data / cur_num_data)
+                    )
+            else:
+                start, end = seq_len - self.config.pe_config['max_length'], seq_len
+                for data, label in [(qk_a, 'qk1_a'), (qk_b, 'qk1_b'), (qk_o, 'qk1_o'), ]:  
+                    qk_dict[f'{label}_layer{self.idx}_avg1'][start:end] = (
+                        qk_dict[f'{label}_layer{self.idx}_avg1'][start:end] * (pre_num_data / cur_num_data)
+                        + torch.mean(data, dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
+                    )
+                    qk_dict[f'{label}_layer{self.idx}_avg2'][start:end] = (
+                        qk_dict[f'{label}_layer{self.idx}_avg2'][start:end] * (pre_num_data / cur_num_data)
+                        + torch.mean(torch.square(data), dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
+                    )
+
+            qk_dict['num_data'] = cur_num_data
+        
+            self.qk_dict = qk_dict
+                
+        if self.config.pe_config['1d']:
+            value = torch.cat([value, torch.zeros_like(value, device=value.device, dtype=value.dtype)], dim=-1)
+        
         attention_mask = attention_mask if attention_mask is not None else torch.ones((query.shape[0], query.shape[1]), device='cuda')
+        # cur_time = datetime.datetime.now()
+        # logger.info('position embedding over, {}'.format(cur_time - pre_time))
+        # pre_time = cur_time            
         if self.config.use_flash:
-            output = flash_attention(query, key, value, attention_mask, softmax_scale=1/math.sqrt(self.head_dim))
+            output = flash_attention(query, key, value, attention_mask, softmax_scale=1/math.sqrt(self.head_dim), half=self.config.pe_config['1d'])
         else:
             query, key, value = query.permute(0, 2, 1, 3), key.permute(
                 0, 2, 1, 3), value.permute(0, 2, 1, 3)
@@ -280,8 +424,14 @@ class LlamaLayer(nn.Module):
                 attention_score + key_padding_mask, dim=-1).type_as(value)
             output = torch.matmul(attention_score, value)
             
+            if self.config.pe_config['1d']:
+                output = output[..., :self.head_dim]
+            
             output = output.transpose(1, 2).contiguous().view(
                 batch_size, seq_len + start_pos, -1)
+        # cur_time = datetime.datetime.now()
+        # logger.info('self attention over, {}'.format(cur_time - pre_time))
+        # pre_time = cur_time            
         output = F.dropout(output, p=self.config.dropout,
                             training=self.training)
         output = output[:, start_pos:, :]
@@ -289,9 +439,15 @@ class LlamaLayer(nn.Module):
         _hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = hidden_states + F.dropout(self.mlp["down_proj"](F.silu(self.mlp["gate_proj"](
             _hidden_states)) * self.mlp["up_proj"](_hidden_states)), p=self.config.dropout, training=self.training)
+        # cur_time = datetime.datetime.now()
+        # logger.info('return hidden, {}'.format(cur_time - pre_time))
         return hidden_states, new_layer_past
 
     def forward(self, inputs: dict):
+        # pre_time = datetime.datetime.now()
+        # cur_time = datetime.datetime.now()
+        # logger.info('forward start, {}'.format(cur_time - pre_time))
+        # pre_time = cur_time
         if self.config.checkpointing and self.training:
             hidden_states, new_layer_past = torch.utils.checkpoint.checkpoint(
                 self._forward,
@@ -301,16 +457,24 @@ class LlamaLayer(nn.Module):
             )
         else:
             hidden_states, new_layer_past = self._forward(**inputs)
+        # cur_time = datetime.datetime.now()
+        # logger.info('forward end, {}'.format(cur_time - pre_time))
+        # pre_time = cur_time
         inputs["hidden_states"] = hidden_states
         new_past_key_values = inputs.get("new_past_key_values", None)
+        # cur_time = datetime.datetime.now()
+        # logger.info('forward update, {}'.format(cur_time - pre_time))
+        # pre_time = cur_time        
         if new_layer_past is not None:
-            new_layer_past.unsqueeze_(0)
+            # new_layer_past.unsqueeze_(0)
             if new_past_key_values is None:
-                new_past_key_values = new_layer_past
+                new_past_key_values = (new_layer_past, )
             else:
-                new_past_key_values = concat_tensor([new_past_key_values, new_layer_past]).to(new_layer_past.device)
+                new_past_key_values += (new_layer_past, )  # concat_tensor .to(new_layer_past.device)
             inputs["new_past_key_values"] = new_past_key_values
-
+        # cur_time = datetime.datetime.now()
+        # logger.info('forward finish, {}'.format(cur_time - pre_time))
+        
         return inputs
 
 class LlamaModel(nn.Module):
@@ -342,9 +506,21 @@ class LlamaModel(nn.Module):
         if past_key_values is not None:
             inputs["past_key_values"] = past_key_values
         all_hidden_states = ()
-        for layer in self.layers:
+        # pre_time = datetime.datetime.now()
+        for i, layer in enumerate(self.layers):
             all_hidden_states += (inputs["hidden_states"],)
-            inputs.update(layer(inputs))
+            # cur_time = datetime.datetime.now()
+            # logger.info('layer {} start, {}'.format(i, cur_time - pre_time))
+            # pre_time = cur_time
+            temp = layer(inputs)
+            # cur_time = datetime.datetime.now()
+            # logger.info('layer {} end, {}'.format(i, cur_time - pre_time))
+            # pre_time = cur_time
+            inputs.update(temp)
+            # cur_time = datetime.datetime.now()
+            # logger.info('layer {} update, {}'.format(i, cur_time - pre_time))
+            # pre_time = cur_time
+
         inputs["hidden_states"] = self.norm(inputs["hidden_states"])
         all_hidden_states += (inputs["hidden_states"], )
 
@@ -719,7 +895,7 @@ class LlamaForCausalLM(CollieModelForCausalLM):
             merge_index_dict(path, tmp_index_files, io_driver)
 
 
-def flash_attention(query, key, value, attention_mask, softmax_scale=None):
+def flash_attention(query, key, value, attention_mask, softmax_scale=None, half=False):
     """
     应用 Flash Attention
 
@@ -745,6 +921,8 @@ def flash_attention(query, key, value, attention_mask, softmax_scale=None):
         output_unpad = flash_attn_varlen_kvpacked_func(
             q_unpad, kv_unpad, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, 0.0, softmax_scale=softmax_scale, causal=True
         )           
+        if half:
+            output_unpad = output_unpad[..., :output_unpad.shape[-1]//2]
         output = pad_input(
             rearrange(output_unpad, "nnz h d -> nnz (h d)"), indices,  batch_size, seq_len
         )

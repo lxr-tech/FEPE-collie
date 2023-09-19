@@ -11,7 +11,7 @@ model_args = {
 }
 
 # '/mnt/petrelfs/share_data/llm_llama/llama2/llama-2-7b-hf/',  # in s cluster
-# '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/',  # in a800 cluster
+# '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/',  # in t cluster
 
 
 train_args = {
@@ -23,6 +23,12 @@ train_args = {
     },
     ('llama2-7B', 8192): {        
         'max_length': 8192, 'world_size': 32, 'train_micro_batch_size': 2, 'eval_batch_size': 1, 
+        'optim': 'AdamW', 'learning_rate': 0.00002, 'max_grad_norm': 2.5, 'weight_decay': 0, 
+        'lr_scheduler_type': 'none', 'train_steps': 1024, 'warmup_steps': 0,
+        'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 1,
+    },
+    ('llama2-7B', 16384): {        
+        'max_length': 16384, 'world_size': 32, 'train_micro_batch_size': 1, 'eval_batch_size': 1, 
         'optim': 'AdamW', 'learning_rate': 0.00002, 'max_grad_norm': 2.5, 'weight_decay': 0, 
         'lr_scheduler_type': 'none', 'train_steps': 1024, 'warmup_steps': 0,
         'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 1,
@@ -39,4 +45,10 @@ train_args = {
         'lr_scheduler_type': 'none', 'train_steps': 1024, 'warmup_steps': 0, 
         'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 1,
     },
+    ('llama2-13B', 16384): {        
+        'max_length': 16384, 'world_size': 32, 'train_micro_batch_size': 1, 'eval_batch_size': 1, 
+        'optim': 'AdamW', 'learning_rate': 0.00002, 'max_grad_norm': 1, 'weight_decay': 0, 
+        'lr_scheduler_type': 'none', 'train_steps': 1024, 'warmup_steps': 0, 
+        'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 1,
+    }
 }

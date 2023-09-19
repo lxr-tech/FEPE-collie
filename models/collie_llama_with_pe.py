@@ -283,6 +283,9 @@ class LlamaLayer(nn.Module):
             start_pos = 0
         query, key = self.self_attn["rotary_emb"](query, key, seq_len, start_pos)
         
+        # query[..., 92:] = 0
+        # key[..., 92:] = 0
+        
         if self.config.pe_config['1d']:
             value = torch.cat([value, torch.zeros_like(value, device=value.device, dtype=value.dtype)], dim=-1)
         if self.num_key_value_groups > 1:

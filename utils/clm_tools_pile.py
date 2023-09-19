@@ -187,7 +187,34 @@ if __name__ == "__main__":
     # dataset = get_book_for_evaluate(test_path, test_lengths)
     # print(len(dataset['65536']))
     
-    test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/books3-test-llama-102400.pkl'
-    test_lengths = [102400, 81920, 65536, 49152, 32768, 4096]
-    dataset = get_book_for_evaluate(test_path, test_lengths)
-    print(len(dataset['102400']))
+    # test_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/books3-test-llama-102400.pkl'
+    # test_lengths = [102400, 81920, 65536, 49152, 32768, 4096]
+    # dataset = get_book_for_evaluate(test_path, test_lengths)
+    # print(len(dataset['102400']))
+    
+    train_length = 16 * 1024
+    file_indices = torch.load('/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/pile-train-llama.pkl')
+    # demo: file_indices[0] = {'file': 'hdd:s3://opennlplab_hdd/backup_trainig_data/train/en/pile/train_111.bin', 'offset': 0}
+    data_indices = []
+    # demo: data_indices[0] = 17
+    cur_file_name, cache = None, None
+    
+    for index, datadict in enumerate(file_indices):
+    
+        datadict['file'] = datadict['file'].replace('hdd:s3://opennlplab_hdd/backup_trainig_data/train/en/pile/', 
+                                                    'p_ssd:s3://P_model_weights/liuxiaoran/backup_trainig_data/train/en/pile/')
+
+        if cur_file_name is None or cache is None or cur_file_name != datadict['file']:
+            cur_file_name, cache = datadict['file'], StringIO(PetrelIODriver.load(datadict['file'], mode='r'))
+        cache.seek(datadict['offset'])
+        sample = json.loads(cache.readline())
+        if len(sample['tokens']) >= train_length:
+            data_indices.append(index)
+        
+        if index % 1000 == 0:
+            print(f"{index} / {len(file_indices)}, {len(data_indices)}")
+            
+    print(len(data_indices))
+    torch.save(data_indices, f'/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/pile-train-llama-{train_length}.pkl')
+    
+        

@@ -8,7 +8,8 @@ ext_dict = {
     '20k': [20480, 18432, 16384, 14336, 12288, 10240, 8192, 6144, 4096, 2048, 1024, ],
     '32k': [32768, 30720, 28672, 26624, 24576, 22528, 20480, 18432, 
             16384, 14336, 12288, 10240, 8192, 6144, 4096, 2048, ],
-    '48k': [49152, 40960, 32768, 24576, 20480, 16384, 8192, 4096], 
+    '48k': [49152, 45056, 40960, 36864, 32768, 28672, 
+            24576, 20480, 16384, 12288, 8192, 4096], 
     '64k': [65536, 49152, 32768, 16384, 4096, ], 
     '100k': [102400, 81920, 65536, 49152, 32768, 4096], 
 }
@@ -52,7 +53,7 @@ def arg_parse():
     parser.add_argument('--pp_size', type=int, default=1)
 
     parser.add_argument('--max_length', type=int, default=512)
-    parser.add_argument('--model_size', type=str, default='330M', choices=['330M', '3B', '7B', 
+    parser.add_argument('--model_size', type=str, default='330M', choices=['330M', '3B', 'llama-7B',  
                                                                            'llama2-7B', 'llama2-13B'])
     parser.add_argument('--dataset', type=str, default='pile', choices=['arxiv', 'pile', 'leval', 'code'])
     parser.add_argument('--ext_length', type=str, default='32k', choices=['10k', '20k', '32k', 
