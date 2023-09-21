@@ -118,7 +118,8 @@ class RotaryPositionEmbedding(nn.Module):
             self.scale = (torch.clamp(-torch.log(theta)/math.log(10000.0), max=1) + 0.4) / 1.4
         else:
             theta = self.omega.float()
-        theta = theta * t
+        theta = torch.cat((theta[..., :92] * t,  # interleaved version, need modify
+                           theta[..., 92:] * torch.clamp(t, max=self.pe_config['max_length'] - 1)), dim=-1)
         sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos.float()
 
         q, k = query.float() * expos, key.float() * expos
@@ -269,8 +270,8 @@ class LlamaLayer(nn.Module):
 
             i = config.model_config.num_hidden_layers - 1
             for label in ['qk1_a', 'qk1_b', 'qk1_o', 'q1k_a', 'q1k_b', 'q1k_o', ]:  # label
-                self.qk_dict[f'{label}_layer{i}_avg1'] = torch.zeros((102400, config.model_config.num_attention_heads))
-                self.qk_dict[f'{label}_layer{i}_avg2'] = torch.zeros((102400, config.model_config.num_attention_heads))
+                self.qk_dict[f'{label}_layer{i}_avg1'] = torch.zeros((102400, config.model_config.num_attention_heads)).cpu()
+                self.qk_dict[f'{label}_layer{i}_avg2'] = torch.zeros((102400, config.model_config.num_attention_heads)).cpu()
 
     def _forward(self, 
                  hidden_states: torch.Tensor,
@@ -336,7 +337,7 @@ class LlamaLayer(nn.Module):
             qk_dict = self.qk_dict
             add_num_data = query.shape[0]
             pre_num_data = qk_dict['num_data']
-            cur_num_data = qk_dict['num_data'] + add_num_data
+            cur_num_data = qk_dict['num_data'] + add_num_data                
             cut_dim = qk_dict['cut_dim']
             
             last_query_a, last_query_b = query[:, -1, :, :cut_dim], query[:, -1, :, cut_dim:]
@@ -395,7 +396,10 @@ class LlamaLayer(nn.Module):
                         + torch.mean(torch.square(data), dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
                     )
 
-            qk_dict['num_data'] = cur_num_data
+            if self.config.pe_config['ntk_option'] != 'dynamic':
+                qk_dict['num_data'] = cur_num_data
+            elif seq_len <= self.config.pe_config['max_length']:
+                qk_dict['num_data'] = cur_num_data
         
             self.qk_dict = qk_dict
                 

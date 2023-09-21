@@ -90,16 +90,23 @@
 #  --base=320000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
 #  --tag='hang_320000' --path='hang_320000' --group='llama2_7B-qk_100k'
 # wait
-srun -p llm_t --ntasks=64 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
- --kill-on-bad-exit=1 -w HOST-10-140-66-[137-144] python test_pe.py --task_a='finetune' --task_b='testing' \
+srun -p llm_t --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+ --kill-on-bad-exit=1 -w HOST-10-140-66-[193-196] python test_pe.py --task_a='finetune' --task_b='testing' \
  --model_size='llama2-7B' --max_length=4096 --dataset='pile' --ext_length='100k' \
  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
  --base=10000 --pi_lambda=1 --ntk_option='dynamic' --ntk_alpha=1 \
- --tag='dynamic' --path='llama2-7B' --group='llama2_7B-qk_100k' --pp_size=4  #
+ --tag='dynamic' --path='llama2-7B' --group='llama2_7B-qk_100k' --pp_size=4
+# wait
+# srun -p llm_t --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-[193-196] python test_pe.py --task_a='finetune' --task_b='testing' \
+#  --model_size='llama2-7B' --max_length=4096 --dataset='pile' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=10000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='-' --path='llama2-7B' --group='llama2_7B-qk_100k' --pp_size=4
 # wait
 # srun -p llm_t --ntasks=8 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
-#  --kill-on-bad-exit=1 -w HOST-10-140-66-186 python test_pe.py --task_a='finetune' --task_b='testing' \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-196 python test_pe.py --task_a='finetune' --task_b='testing' \
 #  --model_size='llama2-7B' --max_length=4096 --dataset='pile' --ext_length='100k' \
 #  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
 #  --base=240000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
-#  --tag='hang_240000' --path='hang_240000' --group='llama2_7B-qk_100k
+#  --tag='hang_240000' --path='hang_240000' --group='llama2_7B-qk_100k'
