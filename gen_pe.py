@@ -14,7 +14,7 @@ from collie import CollieConfig, Trainer, env
 from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonitor
 from collie import ColliePadder, CheckpointCallback, GPTLMLoss
 
-from models.collie_llama_with_pe2 import LlamaForCausalLM
+from models.collie_llama_with_pe3 import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
 from collie import EvaluatorForGeneration, DecodeMetric

@@ -137,3 +137,17 @@
 #  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
 #  --base=10000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
 #  --tag='hang_10000_16k' --path='hang_10000_16K' --group='pjlab_fepe_llama2_7B_4096'
+# wait
+# srun -p llm_t --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-[193-196] python tune_pe.py --task_a='finetune' --task_b='training' \
+#  --model_size='llama2-7B' --max_length=4096 --dataset='pile' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=10000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='hang_10000_92' --path='hang_10000_92' --group='pjlab_fepe_llama2_7B_4096'
+# wait
+# srun -p llm_t --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-[180-183] python tune_pe.py --task_a='finetune' --task_b='training' \
+#  --model_size='llama2-7B' --max_length=16384 --dataset='pile' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=120000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='hang_120000_16k' --path='hang_120000_16K' --group='pjlab_fepe_llama2_7B_4096'

@@ -90,12 +90,12 @@
 #  --base=320000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
 #  --tag='hang_320000' --path='hang_320000' --group='llama2_7B-qk_100k'
 # wait
-srun -p llm_t --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
- --kill-on-bad-exit=1 -w HOST-10-140-66-[193-196] python test_pe.py --task_a='finetune' --task_b='testing' \
- --model_size='llama2-7B' --max_length=4096 --dataset='pile' --ext_length='100k' \
- --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
- --base=10000 --pi_lambda=1 --ntk_option='dynamic' --ntk_alpha=1 \
- --tag='dynamic' --path='llama2-7B' --group='llama2_7B-qk_100k' --pp_size=4
+# srun -p llm_t --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-[193-196] python test_pe.py --task_a='finetune' --task_b='testing' \
+#  --model_size='llama2-7B' --max_length=4096 --dataset='pile' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=10000 --pi_lambda=1 --ntk_option='dynamic' --ntk_alpha=1 \
+#  --tag='dynamic' --path='llama2-7B' --group='llama2_7B-qk_100k' --pp_size=4
 # wait
 # srun -p llm_t --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
 #  --kill-on-bad-exit=1 -w HOST-10-140-66-[193-196] python test_pe.py --task_a='finetune' --task_b='testing' \
@@ -110,3 +110,59 @@ srun -p llm_t --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved 
 #  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
 #  --base=240000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
 #  --tag='hang_240000' --path='hang_240000' --group='llama2_7B-qk_100k'
+# wait
+# srun -p llm_t --ntasks=16 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-[195-196] python test_pe.py --task_a='finetune' --task_b='testing' \
+#  --model_size='llama2-7B' --max_length=4096 --dataset='pile' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=10000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='hang_10000_92' --path='hang_10000_92' --group='llama2_7B-qk_100k' --pp_size=2
+# wait
+# srun -p llm_t --ntasks=8 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-196 python test_pe.py --task_a='finetune' --task_b='testing' \
+#  --model_size='llama2-7B' --max_length=16384 --dataset='pile' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=500 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='hang_500_16k' --path='hang_500_16k' --group='llama2_7B-qk_100k'
+# wait
+# srun -p llm_t --ntasks=8 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-196 python test_pe.py --task_a='finetune' --task_b='testing' \
+#  --model_size='llama2-7B' --max_length=16384 --dataset='pile' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=10000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='hang_10000_16K' --path='hang_10000_16K' --group='llama2_7B-qk_100k'
+# wait
+# srun -p llm_t --ntasks=8 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-196 python test_pe.py --task_a='finetune' --task_b='testing' \
+#  --model_size='llama2-7B' --max_length=16384 --dataset='pile' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=20000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='hang_20000_16K' --path='hang_20000_16K' --group='llama2_7B-qk_100k'
+# wait
+# srun -p llm_t --ntasks=8 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-196 python test_pe.py --task_a='finetune' --task_b='testing' \
+#  --model_size='llama2-7B' --max_length=16384 --dataset='pile' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=40000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='hang_40000_16K' --path='hang_40000_16K' --group='llama2_7B-qk_100k'
+# wait
+# srun -p llm_t --ntasks=8 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-196 python test_pe.py --task_a='finetune' --task_b='testing' \
+#  --model_size='llama2-7B' --max_length=16384 --dataset='pile' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=80000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='hang_80000_16K' --path='hang_80000_16K' --group='llama2_7B-qk_100k'
+# wait
+# srun -p llm_t --ntasks=8 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-196 python test_pe.py --task_a='finetune' --task_b='testing' \
+#  --model_size='llama2-7B' --max_length=16384 --dataset='pile' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=120000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='hang_120000_16K' --path='hang_120000_16K' --group='llama2_7B-qk_100k'
+# wait
+# srun -p llm_t --ntasks=8 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-196 python test_pe.py --task_a='finetune' --task_b='testing' \
+#  --model_size='llama2-7B' --max_length=16384 --dataset='pile' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=1000000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='hang_1000000_16k' --path='hang_1000000_16k' --group='llama2_7B-qk_100k'

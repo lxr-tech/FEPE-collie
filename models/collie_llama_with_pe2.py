@@ -118,8 +118,9 @@ class RotaryPositionEmbedding(nn.Module):
             self.scale = (torch.clamp(-torch.log(theta)/math.log(10000.0), max=1) + 0.4) / 1.4
         else:
             theta = self.omega.float()
-        theta = torch.cat((theta[..., :92] * t,  # interleaved version, need modify
-                           theta[..., 92:] * torch.clamp(t, max=self.pe_config['max_length'] - 1)), dim=-1)
+        theta = theta * t
+        # theta = torch.cat((theta[..., :92] * t,  # interleaved version, need modify
+        #                    theta[..., 92:] * torch.clamp(t, max=self.pe_config['max_length'] - 1)), dim=-1)
         sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos.float()
 
         q, k = query.float() * expos, key.float() * expos
@@ -266,7 +267,7 @@ class LlamaLayer(nn.Module):
             cut = np.log(4096 / 2 / np.pi) / np.log(10000)  # last period covered by train length
             cut = int(np.ceil(cut * dim / 2) * 2)
 
-            self.qk_dict = {'enabled': True, 'num_data': 0, 'cut_dim': cut}
+            self.qk_dict = {'enabled': False, 'num_data': 0, 'cut_dim': cut}
 
             i = config.model_config.num_hidden_layers - 1
             for label in ['qk1_a', 'qk1_b', 'qk1_o', 'q1k_a', 'q1k_b', 'q1k_o', ]:  # label
@@ -331,6 +332,9 @@ class LlamaLayer(nn.Module):
         # logger.info('qkv cache over, {}'.format(cur_time - pre_time))
         # pre_time = cur_time            
         query, key = self.self_attn["rotary_emb"](query, key, start_pos + seq_len)
+                
+        # query[..., 92:] = 0
+        # key[..., 92:] = 0
 
         if not self.training and self.idx == self.config.model_config.num_hidden_layers - 1 \
             and env.dp_rank == 0 and self.qk_dict['enabled'] == True:
@@ -342,7 +346,7 @@ class LlamaLayer(nn.Module):
             
             last_query_a, last_query_b = query[:, -1, :, :cut_dim], query[:, -1, :, cut_dim:]
             key_a, key_b = key[:, :, :, :cut_dim], key[:, :, :, cut_dim:]
-            qk_a = torch.einsum('bnd,bsnd->bsn', last_query_a, key_a).detach() / math.sqrt(self.head_dim)
+            qk_a = torch.einsum('bnd,bsnd->bsn', last_query_a, key_a).detach() / math.sqrt(self.head_dim)  # self.head_dim, 92
             qk_b = torch.einsum('bnd,bsnd->bsn', last_query_b, key_b).detach() / math.sqrt(self.head_dim)
             qk_o = qk_a + qk_b
             
@@ -416,7 +420,7 @@ class LlamaLayer(nn.Module):
             query, key, value = query.permute(0, 2, 1, 3), key.permute(
                 0, 2, 1, 3), value.permute(0, 2, 1, 3)
             attention_score = torch.matmul(query, key.transpose(
-                2, 3)) / math.sqrt(self.head_dim)
+                2, 3)) / math.sqrt(self.head_dim)  # self.head_dim, 92
             if seq_len + start_pos > 1:
                 mask = torch.full((1, 1, seq_len + start_pos, seq_len + start_pos), float("-inf"))
                 mask = torch.triu(mask, diagonal=1).to(

@@ -12,6 +12,8 @@ ext_dict = {
             24576, 20480, 16384, 12288, 8192, 4096], 
     '64k': [65536, 49152, 32768, 16384, 4096, ], 
     '100k': [102400, 81920, 65536, 49152, 32768, 4096], 
+    '128k': [131072, 110592, 4096], 
+    '256k': [262144], 
 }
 
 def arg_parse():
@@ -57,7 +59,8 @@ def arg_parse():
                                                                            'llama2-7B', 'llama2-13B'])
     parser.add_argument('--dataset', type=str, default='pile', choices=['arxiv', 'pile', 'leval', 'code'])
     parser.add_argument('--ext_length', type=str, default='32k', choices=['10k', '20k', '32k', 
-                                                                          '48k', '64k', '100k'])
+                                                                          '48k', '64k', '100k', 
+                                                                          '128k', '256k'])
 
     args = parser.parse_args()
     
