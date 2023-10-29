@@ -14,6 +14,8 @@ ext_dict = {
     '100k': [102400, 81920, 65536, 49152, 32768, 4096], 
     '128k': [131072, 110592, 4096], 
     '256k': [262144], 
+    'gen_100k': [102400 + 256, 81920 + 256, 65536 + 256, 49152 + 256, 
+                 32768 + 256, 16384 + 256, 4096 + 256, 2048 + 256], 
 }
 
 def arg_parse():
@@ -53,14 +55,14 @@ def arg_parse():
     parser.add_argument('--group', type=str, default='')
     
     parser.add_argument('--pp_size', type=int, default=1)
+    parser.add_argument('--tp_size', type=int, default=1)
 
     parser.add_argument('--max_length', type=int, default=512)
     parser.add_argument('--model_size', type=str, default='330M', choices=['330M', '3B', 'llama-7B',  
                                                                            'llama2-7B', 'llama2-13B'])
-    parser.add_argument('--dataset', type=str, default='pile', choices=['arxiv', 'pile', 'leval', 'code'])
-    parser.add_argument('--ext_length', type=str, default='32k', choices=['10k', '20k', '32k', 
-                                                                          '48k', '64k', '100k', 
-                                                                          '128k', '256k'])
+    parser.add_argument('--dataset', type=str, default='pile', choices=['arxiv', 'pile', 'leval', 
+                                                                        'code', 'pajama', ])
+    parser.add_argument('--ext_length', type=str, default='32k', choices=list(ext_dict))
 
     args = parser.parse_args()
     
@@ -92,12 +94,12 @@ def arg_parse():
 
     assert args.tag != '' and args.path != '' and args.group != ''
 
-    tag, path, group, pp_size = args.tag, args.path, args.group, args.pp_size
+    tag, path, group, pp_size, tp_size = args.tag, args.path, args.group, args.pp_size, args.tp_size
 
     assert model_size in model_args and (model_size, max_length) in train_args
 
     model_arg, train_arg = model_args[model_size], train_args[(model_size, max_length)]
 
-    return tag, path, group, pp_size, task, pe_config, ds_config, model_arg, train_arg  # fp_config, hp_config
+    return tag, path, group, pp_size, tp_size, task, pe_config, ds_config, model_arg, train_arg  # fp_config, hp_config
 
 

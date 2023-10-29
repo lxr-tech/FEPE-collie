@@ -121,29 +121,25 @@ class RotaryPositionEmbedding(nn.Module):
         theta = theta * t
         sin, cos, expos = torch.sin(theta), torch.cos(theta), self.expos.float()
 
-        if self.pe_config['imp']:
-            q, k = query.float() * expos, key.float() * expos
-        else:
-            q, k = query.float(), key.float()
+        q, k = query.float() * expos, key.float() * expos
 
         if self.pe_config['1d']:
-            q_real = torch.cat([q * cos[:, start_pos:, ...], 
-                                q * sin[:, start_pos:, ...]], dim=-1)
+            q_real = torch.cat([q * cos, q * sin], dim=-1)
             k_real = torch.cat([k * cos, k * sin], dim=-1)
             # q_imag = torch.cat([q * sin, -q * cos], dim=-1)
         else:
-            q_real = q * cos[:, start_pos:, ...] + rotate_half(q) * sin[:, start_pos:, ...]
+            q_real = q * cos + rotate_half(q) * sin
             k_real = k * cos + rotate_half(k) * sin
             # q_imag = q * sin - rotate_half(q) * cos
             
         if self.pe_config['exp']:
             scale = self.scale ** ((t - seq_len // 2) / self.pe_config['exp_base'])
             scale = scale if not self.pe_config['1d'] else torch.cat([scale, scale], dim=-1)
-            q_real = q_real * scale[:, start_pos:, ...]
+            q_real = q_real * scale
             k_real = k_real / scale
 
         if self.pe_config['log']:
-            q_real = q_real * torch.clamp(torch.log(t[:, start_pos:, ...]+1) / math.log(self.pe_config['log_base']), min=self.pe_config['log_clip'])
+            q_real = q_real * torch.clamp(torch.log(t+1) / math.log(self.pe_config['log_base']), min=self.pe_config['log_clip'])
 
         # query = torch.view_as_complex(
         #     query.float().reshape(*query.shape[:-1], -1, 2))
@@ -266,7 +262,7 @@ class LlamaLayer(nn.Module):
     def _forward(self, 
                  hidden_states: torch.Tensor,
                  attention_mask: Optional[torch.Tensor] = None,
-                #  layer_past: Optional[torch.Tensor] = None,
+                 past_key_values: Optional[torch.Tensor] = None,
                  **kwargs):
         # logger.info('layer start')
         # pre_time = datetime.datetime.now()
@@ -274,14 +270,9 @@ class LlamaLayer(nn.Module):
             self.hidden_states = hidden_states
         else:
             self.hidden_states = None
-        if f"past_key_values_layer{self.idx}_key" in kwargs and f"past_key_values_layer{self.idx}_value" in kwargs:
-            layer_past = (kwargs[f"past_key_values_layer{self.idx}_key"], 
-                          kwargs[f"past_key_values_layer{self.idx}_value"]),   
-        else:
-            layer_past = None
-        # layer_past = None
-        # if past_key_values is not None:
-        #     layer_past = past_key_values[self.idx]
+        layer_past = None
+        if past_key_values is not None:
+            layer_past = past_key_values[self.idx]
         assert hidden_states.ndim == 3, f"hidden_states.shape must be (B, N, H), but got {hidden_states.shape}"
         batch_size, seq_len, _ = hidden_states.shape
         _hidden_states = self.input_layernorm(hidden_states)
@@ -297,7 +288,7 @@ class LlamaLayer(nn.Module):
             # start_pos = layer_past[0].shape[2]
             start_pos = layer_past[0].shape[1]
         else:
-            start_pos = 0        
+            start_pos = 0
         if self.num_key_value_groups > 1:
             key = torch.repeat_interleave(key, dim=2, repeats=self.num_key_value_groups)
             value = torch.repeat_interleave(value, dim=2, repeats=self.num_key_value_groups)
@@ -310,7 +301,7 @@ class LlamaLayer(nn.Module):
             # query = torch.cat([past_key, query], dim=1)
             # key = torch.cat([past_key, key], dim=1)
             # value = torch.cat([layer_past[1].permute([0, 2, 1, 3]), value], dim=1)
-            # query = torch.cat([layer_past[0], query], dim=1)
+            query = torch.cat([layer_past[0], query], dim=1)
             key = torch.cat([layer_past[0], key], dim=1)
             value = torch.cat([layer_past[1], value], dim=1)
         new_layer_past = None
@@ -324,15 +315,12 @@ class LlamaLayer(nn.Module):
             new_layer_past = (key, value)
         # cur_time = datetime.datetime.now()
         # logger.info('qkv cache over, {}'.format(cur_time - pre_time))
-        # pre_time = cur_time
-        # info = f"query.shape: {query.shape}, key.shape: {key.shape}"
-        # logger.info(info)
-        query, key = self.self_attn["rotary_emb"](query, key, start_pos=start_pos, seq_len=start_pos+seq_len)
-        attention_mask = attention_mask if attention_mask is not None else torch.ones((key.shape[0], key.shape[1]), device='cuda')
-        # info = f"query.shape: {query.shape}, key.shape: {key.shape}, attention_mask: {attention_mask.shape}"
-        # logger.info(info)
+        # pre_time = cur_time            
+        query, key = self.self_attn["rotary_emb"](query, key, start_pos + seq_len)
         if self.config.pe_config['1d']:
             value = torch.cat([value, torch.zeros_like(value, device=value.device, dtype=value.dtype)], dim=-1)
+        
+        attention_mask = attention_mask if attention_mask is not None else torch.ones((query.shape[0], query.shape[1]), device='cuda')
         # cur_time = datetime.datetime.now()
         # logger.info('position embedding over, {}'.format(cur_time - pre_time))
         # pre_time = cur_time            
@@ -364,7 +352,7 @@ class LlamaLayer(nn.Module):
         # pre_time = cur_time            
         output = F.dropout(output, p=self.config.dropout,
                             training=self.training)
-        output = output[:, -seq_len:, :]
+        output = output[:, start_pos:, :]
         hidden_states = hidden_states + self.self_attn["o_proj"](output)
         _hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = hidden_states + F.dropout(self.mlp["down_proj"](F.silu(self.mlp["gate_proj"](
@@ -383,7 +371,7 @@ class LlamaLayer(nn.Module):
                 self._forward,
                 inputs["hidden_states"],
                 inputs.get("attention_mask", None),
-                # inputs.get("past_key_values", None)
+                inputs.get("past_key_values", None)
             )
         else:
             hidden_states, new_layer_past = self._forward(**inputs)
@@ -391,19 +379,17 @@ class LlamaLayer(nn.Module):
         # logger.info('forward end, {}'.format(cur_time - pre_time))
         # pre_time = cur_time
         inputs["hidden_states"] = hidden_states
-        # new_past_key_values = inputs.get("new_past_key_values", None)
+        new_past_key_values = inputs.get("new_past_key_values", None)
         # cur_time = datetime.datetime.now()
         # logger.info('forward update, {}'.format(cur_time - pre_time))
         # pre_time = cur_time        
         if new_layer_past is not None:
-            inputs[f"past_key_values_layer{self.idx}_key"] = new_layer_past[0]
-            inputs[f"past_key_values_layer{self.idx}_value"] = new_layer_past[1]
-            # # new_layer_past.unsqueeze_(0)
-            # if new_past_key_values is None:
-            #     new_past_key_values = (new_layer_past, )
-            # else:
-            #     new_past_key_values += (new_layer_past, )  # concat_tensor .to(new_layer_past.device)
-            # inputs["new_past_key_values"] = new_past_key_values
+            # new_layer_past.unsqueeze_(0)
+            if new_past_key_values is None:
+                new_past_key_values = (new_layer_past, )
+            else:
+                new_past_key_values += (new_layer_past, )  # concat_tensor .to(new_layer_past.device)
+            inputs["new_past_key_values"] = new_past_key_values
         # cur_time = datetime.datetime.now()
         # logger.info('forward finish, {}'.format(cur_time - pre_time))
         
@@ -436,9 +422,7 @@ class LlamaModel(nn.Module):
         else:
             inputs["hidden_states"] = self.embed_tokens(inputs["input_ids"])
         if past_key_values is not None:
-            for i in range(self.config.num_hidden_layers):
-                inputs[f"past_key_values_layer{i}_key"] = past_key_values[i][0]
-                inputs[f"past_key_values_layer{i}_value"] = past_key_values[i][1]
+            inputs["past_key_values"] = past_key_values
         all_hidden_states = ()
         # pre_time = datetime.datetime.now()
         for i, layer in enumerate(self.layers):
@@ -458,15 +442,9 @@ class LlamaModel(nn.Module):
         inputs["hidden_states"] = self.norm(inputs["hidden_states"])
         all_hidden_states += (inputs["hidden_states"], )
 
-        if "past_key_values_layer0_key" in inputs and "past_key_values_layer0_value" in inputs:
-            past_key_values = ((inputs["past_key_values_layer0_key"], 
-                                inputs["past_key_values_layer0_value"]), )
-        else:
-            past_key_values = None
-        if past_key_values is not None:
-            for i in range(1, self.config.num_hidden_layers):
-                past_key_values += ((inputs[f"past_key_values_layer{i}_key"], 
-                                     inputs[f"past_key_values_layer{i}_value"]), )
+        past_key_values = None
+        if "new_past_key_values" in inputs:
+            past_key_values = inputs["new_past_key_values"]
 
         return BaseModelOutputWithPast(
             last_hidden_state=inputs["hidden_states"],
@@ -844,22 +822,28 @@ def flash_attention(query, key, value, attention_mask, softmax_scale=None, half=
     :param value: batzh_size, seq_len, heads, head_dim
     :param attetion_mask: batch_size, seq_len
     """
-    from flash_attn.flash_attn_interface import flash_attn_varlen_kvpacked_func
-    from flash_attn.bert_padding import unpad_input, pad_input
+    import flash_attn
+    version = flash_attn.__version__.split('.')[0]
     batch_size, seq_len, _, _ = query.shape
-    kv = torch.stack([key, value], dim=2)
-    # info = f"query.shape: {query.shape}, q_mask: {attention_mask[:, -seq_len:].shape}, key.shape: {key.shape}, k_mask: {attention_mask.shape}"
-    # logger.info(info)
-    q_unpad, indices_q, cu_seqlens_q, max_seqlen_q = unpad_input(query, attention_mask[:, -seq_len:])
-    kv_unpad, indices_k, cu_seqlens_kv, max_seqlen_kv = unpad_input(kv, attention_mask)
-    output_unpad = flash_attn_varlen_kvpacked_func(
-        q_unpad, kv_unpad, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, 0.0, softmax_scale=softmax_scale, causal=True
-    )           
-    if half:
-        output_unpad = output_unpad[..., :output_unpad.shape[-1]//2]
-    output = pad_input(
-        rearrange(output_unpad, "nnz h d -> nnz (h d)"), indices_q, batch_size, seq_len
-    )
+    if int(version) < 2:
+        from flash_attn.flash_attention import FlashAttention
+        qkv = torch.stack([query, key, value], dim=2)
+        output, _ = FlashAttention()(qkv, causal=True)
+        output = rearrange(output, "b n h d -> b n (h d)")
+    else:
+        from flash_attn.flash_attn_interface import flash_attn_varlen_kvpacked_func
+        from flash_attn.bert_padding import unpad_input, pad_input
+        kv = torch.stack([key, value], dim=2)
+        q_unpad, indices, cu_seqlens_q, max_seqlen_q = unpad_input(query, attention_mask)
+        kv_unpad, indices, cu_seqlens_kv, max_seqlen_kv = unpad_input(kv, attention_mask)
+        output_unpad = flash_attn_varlen_kvpacked_func(
+            q_unpad, kv_unpad, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, 0.0, softmax_scale=softmax_scale, causal=True
+        )           
+        if half:
+            output_unpad = output_unpad[..., :output_unpad.shape[-1]//2]
+        output = pad_input(
+            rearrange(output_unpad, "nnz h d -> nnz (h d)"), indices,  batch_size, seq_len
+        )
     return output
 
 def merge_index_dict(path, file_list, driver):

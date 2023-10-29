@@ -336,76 +336,76 @@ class LlamaLayer(nn.Module):
         # query[..., 92:] = 0
         # key[..., 92:] = 0
 
-        if not self.training and self.idx == self.config.model_config.num_hidden_layers - 1 \
-            and env.dp_rank == 0 and self.qk_dict['enabled'] == True:
-            qk_dict = self.qk_dict
-            add_num_data = query.shape[0]
-            pre_num_data = qk_dict['num_data']
-            cur_num_data = qk_dict['num_data'] + add_num_data                
-            cut_dim = qk_dict['cut_dim']
+        # if not self.training and self.idx == self.config.model_config.num_hidden_layers - 1 \
+        #     and env.dp_rank == 0 and self.qk_dict['enabled'] == True:
+        #     qk_dict = self.qk_dict
+        #     add_num_data = query.shape[0]
+        #     pre_num_data = qk_dict['num_data']
+        #     cur_num_data = qk_dict['num_data'] + add_num_data                
+        #     cut_dim = qk_dict['cut_dim']
             
-            last_query_a, last_query_b = query[:, -1, :, :cut_dim], query[:, -1, :, cut_dim:]
-            key_a, key_b = key[:, :, :, :cut_dim], key[:, :, :, cut_dim:]
-            qk_a = torch.einsum('bnd,bsnd->bsn', last_query_a, key_a).detach() / math.sqrt(self.head_dim)  # self.head_dim, 92
-            qk_b = torch.einsum('bnd,bsnd->bsn', last_query_b, key_b).detach() / math.sqrt(self.head_dim)
-            qk_o = qk_a + qk_b
+        #     last_query_a, last_query_b = query[:, -1, :, :cut_dim], query[:, -1, :, cut_dim:]
+        #     key_a, key_b = key[:, :, :, :cut_dim], key[:, :, :, cut_dim:]
+        #     qk_a = torch.einsum('bnd,bsnd->bsn', last_query_a, key_a).detach() / math.sqrt(self.head_dim)  # self.head_dim, 92
+        #     qk_b = torch.einsum('bnd,bsnd->bsn', last_query_b, key_b).detach() / math.sqrt(self.head_dim)
+        #     qk_o = qk_a + qk_b
             
-            if self.config.pe_config['ntk_option'] != 'dynamic':
-                for data, label in [(qk_a, 'q1k_a'), (qk_b, 'q1k_b'), (qk_o, 'q1k_o'), ]:  
-                    qk_dict[f'{label}_layer{self.idx}_avg1'] = (
-                        qk_dict[f'{label}_layer{self.idx}_avg1'] * (pre_num_data / cur_num_data)
-                        + torch.mean(data, dim=0).float().cpu() * (add_num_data / cur_num_data)
-                    )
-                    qk_dict[f'{label}_layer{self.idx}_avg2'] = (
-                        qk_dict[f'{label}_layer{self.idx}_avg2'] * (pre_num_data / cur_num_data)
-                        + torch.mean(torch.square(data), dim=0).float().cpu() * (add_num_data / cur_num_data)
-                    )
-            else:
-                start, end = seq_len - self.config.pe_config['max_length'], seq_len
-                for data, label in [(qk_a, 'q1k_a'), (qk_b, 'q1k_b'), (qk_o, 'q1k_o'), ]: 
-                    qk_dict[f'{label}_layer{self.idx}_avg1'][start:end] = (
-                        qk_dict[f'{label}_layer{self.idx}_avg1'][start:end] * (pre_num_data / cur_num_data)
-                        + torch.mean(data, dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
-                    )
-                    qk_dict[f'{label}_layer{self.idx}_avg2'][start:end] = (
-                        qk_dict[f'{label}_layer{self.idx}_avg2'][start:end] * (pre_num_data / cur_num_data)
-                        + torch.mean(torch.square(data), dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
-                    )             
+        #     if self.config.pe_config['ntk_option'] != 'dynamic':
+        #         for data, label in [(qk_a, 'q1k_a'), (qk_b, 'q1k_b'), (qk_o, 'q1k_o'), ]:  
+        #             qk_dict[f'{label}_layer{self.idx}_avg1'] = (
+        #                 qk_dict[f'{label}_layer{self.idx}_avg1'] * (pre_num_data / cur_num_data)
+        #                 + torch.mean(data, dim=0).float().cpu() * (add_num_data / cur_num_data)
+        #             )
+        #             qk_dict[f'{label}_layer{self.idx}_avg2'] = (
+        #                 qk_dict[f'{label}_layer{self.idx}_avg2'] * (pre_num_data / cur_num_data)
+        #                 + torch.mean(torch.square(data), dim=0).float().cpu() * (add_num_data / cur_num_data)
+        #             )
+        #     else:
+        #         start, end = seq_len - self.config.pe_config['max_length'], seq_len
+        #         for data, label in [(qk_a, 'q1k_a'), (qk_b, 'q1k_b'), (qk_o, 'q1k_o'), ]: 
+        #             qk_dict[f'{label}_layer{self.idx}_avg1'][start:end] = (
+        #                 qk_dict[f'{label}_layer{self.idx}_avg1'][start:end] * (pre_num_data / cur_num_data)
+        #                 + torch.mean(data, dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
+        #             )
+        #             qk_dict[f'{label}_layer{self.idx}_avg2'][start:end] = (
+        #                 qk_dict[f'{label}_layer{self.idx}_avg2'][start:end] * (pre_num_data / cur_num_data)
+        #                 + torch.mean(torch.square(data), dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
+        #             )             
 
-            query_a, query_b = query[:, :, :, :cut_dim], query[:, :, :, cut_dim:]
-            first_key_a, first_key_b = key[:, 0, :, :cut_dim], key[:, 0, :, cut_dim:]
-            qk_a = torch.einsum('bnd,bsnd->bsn', first_key_a, query_a).detach() / math.sqrt(self.head_dim)
-            qk_b = torch.einsum('bnd,bsnd->bsn', first_key_b, query_b).detach() / math.sqrt(self.head_dim)
-            qk_o = qk_a + qk_b
+        #     query_a, query_b = query[:, :, :, :cut_dim], query[:, :, :, cut_dim:]
+        #     first_key_a, first_key_b = key[:, 0, :, :cut_dim], key[:, 0, :, cut_dim:]
+        #     qk_a = torch.einsum('bnd,bsnd->bsn', first_key_a, query_a).detach() / math.sqrt(self.head_dim)
+        #     qk_b = torch.einsum('bnd,bsnd->bsn', first_key_b, query_b).detach() / math.sqrt(self.head_dim)
+        #     qk_o = qk_a + qk_b
             
-            if self.config.pe_config['ntk_option'] != 'dynamic':
-                for data, label in [(qk_a, 'qk1_a'), (qk_b, 'qk1_b'), (qk_o, 'qk1_o'), ]: 
-                    qk_dict[f'{label}_layer{self.idx}_avg1'] = (
-                        qk_dict[f'{label}_layer{self.idx}_avg1'] * (pre_num_data / cur_num_data)
-                        + torch.mean(data, dim=0).float().cpu() * (add_num_data / cur_num_data)
-                    )
-                    qk_dict[f'{label}_layer{self.idx}_avg2'] = (
-                        qk_dict[f'{label}_layer{self.idx}_avg2'] * (pre_num_data / cur_num_data)
-                        + torch.mean(torch.square(data), dim=0).float().cpu() * (add_num_data / cur_num_data)
-                    )
-            else:
-                start, end = seq_len - self.config.pe_config['max_length'], seq_len
-                for data, label in [(qk_a, 'qk1_a'), (qk_b, 'qk1_b'), (qk_o, 'qk1_o'), ]:  
-                    qk_dict[f'{label}_layer{self.idx}_avg1'][start:end] = (
-                        qk_dict[f'{label}_layer{self.idx}_avg1'][start:end] * (pre_num_data / cur_num_data)
-                        + torch.mean(data, dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
-                    )
-                    qk_dict[f'{label}_layer{self.idx}_avg2'][start:end] = (
-                        qk_dict[f'{label}_layer{self.idx}_avg2'][start:end] * (pre_num_data / cur_num_data)
-                        + torch.mean(torch.square(data), dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
-                    )
+        #     if self.config.pe_config['ntk_option'] != 'dynamic':
+        #         for data, label in [(qk_a, 'qk1_a'), (qk_b, 'qk1_b'), (qk_o, 'qk1_o'), ]: 
+        #             qk_dict[f'{label}_layer{self.idx}_avg1'] = (
+        #                 qk_dict[f'{label}_layer{self.idx}_avg1'] * (pre_num_data / cur_num_data)
+        #                 + torch.mean(data, dim=0).float().cpu() * (add_num_data / cur_num_data)
+        #             )
+        #             qk_dict[f'{label}_layer{self.idx}_avg2'] = (
+        #                 qk_dict[f'{label}_layer{self.idx}_avg2'] * (pre_num_data / cur_num_data)
+        #                 + torch.mean(torch.square(data), dim=0).float().cpu() * (add_num_data / cur_num_data)
+        #             )
+        #     else:
+        #         start, end = seq_len - self.config.pe_config['max_length'], seq_len
+        #         for data, label in [(qk_a, 'qk1_a'), (qk_b, 'qk1_b'), (qk_o, 'qk1_o'), ]:  
+        #             qk_dict[f'{label}_layer{self.idx}_avg1'][start:end] = (
+        #                 qk_dict[f'{label}_layer{self.idx}_avg1'][start:end] * (pre_num_data / cur_num_data)
+        #                 + torch.mean(data, dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
+        #             )
+        #             qk_dict[f'{label}_layer{self.idx}_avg2'][start:end] = (
+        #                 qk_dict[f'{label}_layer{self.idx}_avg2'][start:end] * (pre_num_data / cur_num_data)
+        #                 + torch.mean(torch.square(data), dim=0)[start:end].float().cpu() * (add_num_data / cur_num_data)
+        #             )
 
-            if self.config.pe_config['ntk_option'] != 'dynamic':
-                qk_dict['num_data'] = cur_num_data
-            elif seq_len <= self.config.pe_config['max_length']:
-                qk_dict['num_data'] = cur_num_data
+        #     if self.config.pe_config['ntk_option'] != 'dynamic':
+        #         qk_dict['num_data'] = cur_num_data
+        #     elif seq_len <= self.config.pe_config['max_length']:
+        #         qk_dict['num_data'] = cur_num_data
         
-            self.qk_dict = qk_dict
+        #     self.qk_dict = qk_dict
                 
         if self.config.pe_config['1d']:
             value = torch.cat([value, torch.zeros_like(value, device=value.device, dtype=value.dtype)], dim=-1)

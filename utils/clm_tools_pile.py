@@ -144,6 +144,51 @@ def get_book_for_evaluate(test_path, test_lengths):
     return test_datasets
 
 
+def get_gen_book_for_evaluate(gen_path, gen_lengths):
+
+    if os.path.exists(gen_path):
+        return torch.load(gen_path)
+    
+    path = 'p_ssd:s3://P_model_weights/liuxiaoran/backup_trainig_data/valid/en/pile_Books3/val.bin'
+    # path = 'hdd:s3://opennlplab_hdd/backup_trainig_data/valid/en/pile_Books3/val.bin'
+    assert PetrelIODriver.exists(path + '.meta')
+    meta = np.load(PetrelIODriver.load_buffer(path + '.meta'))
+    data = StringIO(PetrelIODriver.load(path, mode='r'))
+    
+    indices = []    
+    if os.path.exists(gen_path + '.meta'):
+        indices = torch.load(gen_path + '.meta')
+    else:
+        for sample in meta:
+            if sample[1] >= max(gen_lengths):
+                indices.append({'offset': sample[0]})
+        torch.save(indices, gen_path + '.meta')
+
+    dataset = []
+    for datadict in indices:
+        data.seek(datadict['offset'])
+        sample = json.loads(data.readline())
+        dataset.append({'input_ids': torch.tensor(sample['tokens'][:max(gen_lengths)]).long(), })
+    dataset = Dataset.from_list(dataset)
+    
+    if env.local_rank == 0:
+        print("evaluate data num =", len(dataset))
+
+    test_datasets = {}
+    for length in sorted(gen_lengths, reverse=True):
+        print(length)
+        dataset = dataset.map(lambda instance: {'input_ids': instance['input_ids'][:length-256],
+                                                'target': instance['input_ids'][length-256:length]})
+        test_datasets[str(length)] = deepcopy(dataset)
+        
+    for length in gen_lengths:
+        print(length, len(test_datasets[str(length)][0]['input_ids']), 
+                      len(test_datasets[str(length)][0]['target']), )
+
+    torch.save(test_datasets, gen_path)
+    return test_datasets
+
+
 def get_extra_book_for_evaluate(test_path, test_length, test_num):
 
     if os.path.exists(test_path):
@@ -267,15 +312,21 @@ if __name__ == "__main__":
     # dataset = get_extra_book_for_evaluate(test_path, test_length, test_num=32)
     # print(len(dataset))
     
-    dataset = torch.load('/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/books3-test-llama-1M-extra.pkl')
-    max_length = 262144
+    # dataset = torch.load('/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/books3-test-llama-1M-extra.pkl')
+    # max_length = 262144
     
-    test_datasets = {}
-    dataset = dataset.map(lambda instance: {'input_ids': instance['input_ids'][:max_length],
-                                            'labels': instance['input_ids'][:max_length]})
-    test_datasets[str(max_length)] = deepcopy(dataset)
+    # test_datasets = {}
+    # dataset = dataset.map(lambda instance: {'input_ids': instance['input_ids'][:max_length],
+    #                                         'labels': instance['input_ids'][:max_length]})
+    # test_datasets[str(max_length)] = deepcopy(dataset)
 
-    torch.save(test_datasets, '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/books3-test-llama-262144.pkl')
+    # torch.save(test_datasets, '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/books3-test-llama-262144.pkl')
+
+    gen_lengths = [102400 + 256, 81920 + 256, 65536 + 256, 49152 + 256, 
+                   32768 + 256, 16384 + 256, 4096 + 256, 2048 + 256]
+    gen_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/books3-gen-llama-102656.pkl'
+    dataset = get_gen_book_for_evaluate(gen_path, gen_lengths)
+    print(len(dataset['102656']))
 
 """
 0 242632

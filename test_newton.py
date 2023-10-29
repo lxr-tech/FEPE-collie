@@ -22,7 +22,7 @@ from models.tokenization_internlm import InternLMTokenizer
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation, CumGPTLMLoss, CumPPLMetric, CumAccMetric
 
-tag, path, group, pp_size, task, pe_config, ds_config, model_args, train_args = arg_parse()
+tag, path, group, pp_size, tp_size, task, pe_config, ds_config, model_args, train_args = arg_parse()
 
 config = CollieConfig.from_pretrained(name_or_path='/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/models', 
                                       protocol='petrel')

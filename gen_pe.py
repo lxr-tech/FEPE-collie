@@ -14,13 +14,14 @@ from collie import CollieConfig, Trainer, env
 from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonitor
 from collie import ColliePadder, CheckpointCallback, GPTLMLoss
 
-from models.collie_llama_with_pe3 import LlamaForCausalLM
+# from models.collie_llama_with_pe4 import LlamaForCausalLM
+from collie import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
-from collie import EvaluatorForGeneration, DecodeMetric
+from utils.clm_tools_dec import PrintMetric, EvaluatorForGeneration
 from transformers.generation.utils import GenerationConfig
 
-tag, path, group, pp_size, task, pe_config, ds_config, model_args, train_args = arg_parse()
+tag, path, group, pp_size, tp_size, task, pe_config, ds_config, model_args, train_args = arg_parse()
 
 assert task['training'] == False
 
@@ -41,8 +42,9 @@ if not group.__contains__('rand'):
     torch.backends.cudnn.deterministic = True
 
 config.pp_size = pp_size
+config.tp_size = tp_size
 config.train_micro_batch_size = train_args['train_micro_batch_size'] 
-config.gradient_accumulation_steps = 1
+# config.gradient_accumulation_steps = pp_size
 config.eval_batch_size = train_args['eval_batch_size']
 config.train_epochs = 1
 config.eval_per_n_epochs = train_args['eval_per_n_epochs']
@@ -64,7 +66,7 @@ config.ds_config = {
 
 config.__setattr__('pe_config', pe_config)
 
-file_name = './csv_logs/{}-{}.txt'.format(group, tag)
+file_name = None  # './csv_logs/{}-{}.txt'.format(group, tag)
     
 config.__setattr__('file_name', file_name)
 
@@ -85,7 +87,7 @@ if ds_config['dataset'] == 'pile':
     test_lengths = ds_config['ext_lengths']
 
     train_path = 'pile-train-llama-{}.pkl'.format(train_args['max_length'])
-    test_path = 'books3-test-llama-{}.pkl'.format(max(test_lengths))
+    test_path = 'books3-gen-llama-{}.pkl'.format(max(test_lengths))
 
     num_training_steps, num_warmup_steps = train_args['train_steps'], train_args['warmup_steps']
     num_data = train_args['train_micro_batch_size'] * env.dp_size * num_training_steps
@@ -112,16 +114,19 @@ test_lengths.reverse()
 
 save_path = '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/gen_monitor'
 
-for item in range(len(test_lengths) - 1):
-    cur, nex = test_lengths[item], test_lengths[item+1]
+test_lengths = [2048 + 256]  # 102400 + 256, 81920 + 256, 65536 + 256, 49152 + 256, 4096 + 256, 
+
+for item in test_lengths:
+    sub_dataset = test_datasets[str(item)]  # .select(range(env.dp_size))
+    print("len(sub_dataset)", len(sub_dataset))
     evaluators.append(EvaluatorForGeneration(model=model, tokenizer=torch, 
-                                             dataset=test_datasets[str(cur)], monitors=[EvalMonitor(config) ], 
-                                             config=config, metrics={'dec': DecodeMetric(verbose=True, save_to_file=True,
-                                                                                         save_path=f'{save_path}/{group}-{tag}.txt')}, 
+                                             dataset=sub_dataset, monitors=[EvalMonitor(config) ], 
+                                             config=config, metrics={str(item): PrintMetric(verbose=False, save_to_file=True,
+                                                                                           save_path=f'{save_path}/{group}-{tag}')}, 
                                              generation_config=GenerationConfig(eos_token_id=tokenizer.eos_token_id, 
                                                                                 pad_token_id=tokenizer.pad_token_id, 
                                                                                 num_beams=1, do_sample=False, use_chche=True, 
-                                                                                max_new_tokens=256, ), ))  # nex-cur
+                                                                                max_new_tokens=256, ), ))  # nex-cur, 256
         
 model_size = sum([param.nelement() for param in model.parameters()]) / 1e6
 
@@ -142,7 +147,7 @@ trainer = Trainer(model=model, tokenizer=tokenizer, config=config,
                   monitors=[LossMonitor(config), LRMonitor(config), TGSMonitor(config), MemoryMonitor(config), ], 
                   callbacks=callbacks)
 
-if env.rank == 0:
+if file_name != None and env.rank == 0:
     file = open(file_name, 'a')
     file.write(str(datetime.now()) + '\n\n')
     file.write('model type : {} , model size : {}M \n'.format(tag, model_size))
@@ -156,18 +161,19 @@ if env.rank == 0:
 try:
     trainer.eval()
 except BaseException as e:
-    import sys
-    import traceback
-    from rich.console import Console
-    file = open("traceback.log", 'a+')
-    file.write(str(datetime.now()) + "\n\n")
-    sys.stdout = file
-    traceback.print_exc(file=file)
-    file.write("\n\n")
-    Console().print_exception()
-    raise e
+    if env.rank == 0:
+        import sys
+        import traceback
+        from rich.console import Console
+        file = open("traceback.log", 'a+')
+        file.write(str(datetime.now()) + "\n\n")
+        sys.stdout = file
+        traceback.print_exc(file=file)
+        file.write("\n\n")
+        # Console().print_exception()
+        raise e
 
-if env.rank == 0:
+if file_name != None and env.rank == 0:
     file = open(file_name, 'a')
     file.write('}\n\n')
     file.close()

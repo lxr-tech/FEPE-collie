@@ -1,5 +1,6 @@
 *.pyc
 *.jpg
+*.pdf
 *.json
 __pycache__
 

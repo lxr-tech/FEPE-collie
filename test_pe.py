@@ -21,7 +21,7 @@ from models.collie_llama_with_pe2 import LlamaForCausalLM
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation, CumGPTLMLoss, CumPPLMetric, CumAccMetric
 
-tag, path, group, pp_size, task, pe_config, ds_config, model_args, train_args = arg_parse()
+tag, path, group, pp_size, tp_size, task, pe_config, ds_config, model_args, train_args = arg_parse()
 
 config = CollieConfig.from_pretrained(model_args['model_path_or_name'])
 
