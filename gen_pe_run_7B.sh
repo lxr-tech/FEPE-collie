@@ -96,10 +96,9 @@
 #  --base=10000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
 #  --tag='hang_10000_92_log' --path='hang_10000_92' --group='llama2_7B_gen_4096'
 # wait
-srun -p llm2_t --ntasks=64 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
- --kill-on-bad-exit=1 -w HOST-10-140-66-[156-159,185,187,193-194] python gen_pe.py --task_a='finetune' --task_b='testing' \
- --model_size='llama2-7B' --max_length=4096 --dataset='pile' --ext_length='gen_100k' \
- --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
- --base=10000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
- --tag='llama2_7B_new_tp' --path='llama2-7B' --group='test_pp_gen' --tp_size=2
-
+# srun -p llm2_t --ntasks=64 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-[156-159,185,187,193-194] python gen_pe.py --task_a='finetune' --task_b='testing' \
+#  --model_size='llama2-7B' --max_length=4096 --dataset='pile' --ext_length='gen_100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=10000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='llama2_7B_new_tp' --path='llama2-7B' --group='test_pp_gen' --tp_size=2

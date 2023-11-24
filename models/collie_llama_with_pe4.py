@@ -109,10 +109,22 @@ class RotaryPositionEmbedding(nn.Module):
             if self.pe_config['imp']:
                 raise KeyError('ntk for imp is not currently supported')
             # copy from https://huggingface.co/Qwen/Qwen-7B/blob/main/modeling_qwen.py#L379
-            base = max(2 ** math.ceil(math.log(seq_len / self.pe_config['max_length'], 2) + 1) - 1, 1)
+            base = max(2 ** math.ceil(math.log(seq_len / self.pe_config['log_base'], 2) + 1) - 1, 1)
             alpha = self.pe_config['base'] * base ** (self.head_dim / (self.head_dim - (1 if self.pe_config['1d'] else 2)))
             theta = 1.0 / (alpha ** (torch.arange(0, self.head_dim, 1 if self.pe_config['1d'] else 2, 
                                                   device='cuda') / self.head_dim)).float()
+            theta = theta if self.pe_config['1d'] else torch.stack([theta, theta], axis=-1).reshape((self.head_dim))
+            theta = theta[None, None, None, :]
+            self.scale = (torch.clamp(-torch.log(theta)/math.log(10000.0), max=1) + 0.4) / 1.4
+        elif self.pe_config['ntk_option'] == 'dynamic_new': 
+            if self.pe_config['imp']:
+                raise KeyError('ntk for imp is not currently supported')
+            # based on https://arxiv.org/pdf/2310.05209.pdf
+            dim_c = math.log(self.pe_config['log_base'] / (2 * math.pi), self.pe_config['base'])
+            dim_c = 2 * math.ceil(self.head_dim * dim_c / 2)
+            base = (seq_len / (2 * math.pi)) ** (self.head_dim / (dim_c - 2))
+            theta = 1.0 / (base ** (torch.arange(0, self.head_dim, 1 if self.pe_config['1d'] else 2, 
+                                                   device='cuda') / self.head_dim)).float()
             theta = theta if self.pe_config['1d'] else torch.stack([theta, theta], axis=-1).reshape((self.head_dim))
             theta = theta[None, None, None, :]
             self.scale = (torch.clamp(-torch.log(theta)/math.log(10000.0), max=1) + 0.4) / 1.4

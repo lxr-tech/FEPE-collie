@@ -1,7 +1,9 @@
 *.pyc
 *.jpg
 *.pdf
+*.pkl
 *.json
+*.model
 __pycache__
 
 checkpoints/

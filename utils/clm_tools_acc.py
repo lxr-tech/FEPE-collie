@@ -31,8 +31,8 @@ class FlashGPTLMLoss(torch.nn.Module):
         self.loss = torch.nn.CrossEntropyLoss(ignore_index=ignore_index)  # ignore <pad> when compute loss
     
     def forward(self, logits: torch.Tensor, labels: torch.Tensor):
-        shift_logits = logits[:-1, :].contiguous()
-        shift_labels = labels[1:].contiguous().to(logits.device)
+        shift_logits = logits[:-1, :]  # .contiguous()
+        shift_labels = labels[1:].to(logits.device)
         return self.loss(shift_logits, shift_labels)
 
 
@@ -45,12 +45,12 @@ class CumGPTLMLoss(torch.nn.Module):  # count accumulative perplexity for batch 
         self.loss = torch.nn.CrossEntropyLoss(ignore_index=ignore_index, reduction='none')
     
     def forward(self, logits: torch.Tensor, labels: torch.Tensor):
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = labels[..., 1:].contiguous().to(logits.device)
+        shift_logits = logits[..., :-1, :]  # .contiguous()
+        shift_labels = labels[..., 1:].to(logits.device)
         cur_loss = self.loss(shift_logits.reshape(-1, shift_logits.size(-1)), shift_labels.reshape(-1))
         cur_loss = cur_loss.reshape((-1, self.max_len - 1)).float()
         cum_loss = torch.cumsum(cur_loss, dim=-1)
-        cum_loss = cum_loss / torch.arange(1, self.max_len, 1, device='cuda').reshape((1, -1))
+        cum_loss = cum_loss / torch.arange(1, self.max_len, 1).to(cum_loss.device).reshape((1, -1))
         return cum_loss
 
 
@@ -150,24 +150,56 @@ class EvaluatorForExtrapolation(Evaluator):
             if "labels" in batch.keys():
                 prefix_labels = torch.full((batch_size, evaluator.config.peft_config.num_virtual_tokens), -100).to(batch["labels"].device)
                 batch["labels"] = torch.cat((prefix_labels, batch["labels"]), dim=1)
+        # if evaluator.dynamic_enabled:
+        #     batch_size, seq_len = batch['input_ids'].shape
+        #     logits = torch.zeros((batch_size, seq_len, evaluator.config.model_config.vocab_size))  # .to(batch["labels"].device)
+        #     past_key_values, start_pos = None, 0
+        #     if evaluator.config.pp_size > 1:
+        #         if isinstance(evaluator.engine.module, PipelineModel):
+        #             evaluator.engine.module.forward_type = "eval"
+        #     for i in range(evaluator.dynamic_stride,  # start_size + evaluator.config.args.local_size, 
+        #                    seq_len + evaluator.dynamic_stride, 
+        #                    evaluator.dynamic_stride):
+        #         i = min(i, seq_len)
+        #         if env.rank == 0:
+        #             logger.info(i)
+        #         if evaluator.config.pp_size > 1:
+                    
+        #             outputs = evaluator.engine.module(input_ids=batch['input_ids'][..., start_pos:i], 
+        #                                               labels=batch['labels'][..., start_pos:i], 
+        #                                               past_key_values=past_key_values)
+        #         else:
+        #             outputs = evaluator.engine(input_ids=batch['input_ids'][..., start_pos:i], 
+        #                                        past_key_values=past_key_values)
+        #         logits[..., start_pos:i, :] = outputs.get('logits').float().cpu()
+        #         past_key_values, start_pos = outputs.get('past_key_values'), i
+        #     outputs = {'logits': logits}
         if evaluator.dynamic_enabled:
             batch_size, seq_len = batch['input_ids'].shape
             logits = None
             if evaluator.config.pp_size > 1:
                 if isinstance(evaluator.engine.module, PipelineModel):
                     evaluator.engine.module.forward_type = "eval"
-            for i in range(seq_len, 0, -evaluator.dynamic_stride):
-                if env.rank == 0:
-                    logger.info(i)
-                if evaluator.config.pp_size > 1:
-                    outputs = evaluator.engine.module(input_ids=batch['input_ids'][..., :i], 
-                                                      labels=batch['labels'][..., :i])
-                else:
-                    outputs = evaluator.engine(input_ids=batch['input_ids'][..., :i])
-                if logits is not None:
-                    logits[..., :i, :] = outputs.get('logits')[..., :i, :]
-                else:
-                    logits = outputs.get('logits')
+            # end_pos = list(range(evaluator.dynamic_stride, 
+            #                      seq_len + evaluator.dynamic_stride, 
+            #                      evaluator.dynamic_stride))
+            # end_pos.reverse()
+            # for i in end_pos:
+            with torch.no_grad():
+                for i in range(seq_len, 0, -evaluator.dynamic_stride):
+                    i = max(i, evaluator.dynamic_stride)
+                    if env.rank == 0:
+                        logger.info(i)
+                    if evaluator.config.pp_size > 1:
+                        outputs = evaluator.engine.module(input_ids=batch['input_ids'][..., :i], 
+                                                        labels=batch['labels'][..., :i])
+                    else:
+                        outputs = evaluator.engine(input_ids=batch['input_ids'][..., :i])
+                    if logits is not None:
+                        logits[..., :i, :] = outputs.get('logits')[..., :i, :].float().cpu()
+                    else:
+                        logits = outputs.get('logits').float().cpu()
+                    torch.cuda.empty_cache()
             outputs = {'logits': logits}
         else:
             if env.rank == 0: 
@@ -184,8 +216,8 @@ class EvaluatorForExtrapolation(Evaluator):
         loss = auto_param_call(evaluator.loss_fn, {**batch, **outputs},
                                signature_fn=evaluator.loss_fn.forward if isinstance(evaluator.loss_fn, nn.Module) else evaluator.loss_fn)
         seq_len = torch.sum((batch['labels'] != 1).int(), dim=-1)
-        logits = outputs.get('logits')[..., :-1, :].contiguous()
-        target = batch['labels'][..., 1:].cuda().contiguous()
+        logits = outputs.get('logits')[..., :-1, :]  # .contiguous()
+        target = batch['labels'][..., 1:]  # .cuda().contiguous()
         pred = torch.max(logits, dim=-1)[1]
 
         return {

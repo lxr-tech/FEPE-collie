@@ -9,28 +9,29 @@ from datetime import datetime
 
 from transformers import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 
-# import sys
-# sys.path.append('../collie/')
-
 from collie import CollieConfig, Trainer, env
 from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonitor
 from collie import ColliePadder, CheckpointCallback, GPTLMLoss
 
-from models.collie_llama_with_pe import LlamaForCausalLM
+from models.collie_llama_with_pe4 import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation, CumGPTLMLoss, CumPPLMetric, CumAccMetric
 
 tag, path, group, args, task, pe_config, ds_config, model_args, train_args = arg_parse()
 
-config = CollieConfig.from_pretrained(model_args['model_path_or_name'])
+paths = {'llama2_7B': '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-7b-hf/', 
+         'base500000_7B': '/mnt/petrelfs/share_data/llm_delivery/exported_transformers/official_Shuxingbei_7B_llama2_fp_base500000/10000/', 
+         'base500000_7B_16k': '/mnt/petrelfs/share_data/llm_delivery/exported_transformers/official_Shuxingbei_7B_llama2_fp_base500000_16k_context/10000/', 
+         'base2000000_7B': '/mnt/petrelfs/share_data/xingshuhao/exported_transformers/official_Shuxingbei_7B_llama2base2000000_fix_weightdecay/10000/', 
+         'base2000000_7B_16k': '/mnt/petrelfs/share_data/xingshuhao/exported_transformers/official_Shuxingbei_7B_llama2base2000000_fix_weightdecay_16k_context/10000/',
+         }
 
-# assert config.model_config.hidden_size == model_args['hidden_size']
-# assert config.model_config.intermediate_size == model_args['intermediate_size']
-# assert config.model_config.num_attention_heads == model_args['num_attention_heads']
-# assert config.model_config.num_hidden_layers == model_args['num_hidden_layers']
+model_path = paths[path]
 
-config.model_config.use_cache = False
+config = CollieConfig.from_pretrained(model_path, trust_remote_code=True)
+
+config.model_config.use_cache = False  # (pe_config['ntk_option'] == 'dynamic')
 config.checkpointing = True
 
 if not group.__contains__('rand'):
@@ -56,15 +57,12 @@ config.ds_config = {
     },
     'train_micro_batch_size_per_gpu': config.train_micro_batch_size,  # * config.gradient_accumulation_steps,
     'monitor_config': {
-        'enabled': True,
-        'tag': f'{model_args["size"]}-{tag}-',  # tag
+        'enabled': task['training'],
+        'tag': f'{group}-ckpt_{args.ckpt}-{tag}-',  # tag
         'csv_monitor': {  # wandb
             'enabled': task['training'],
             'output_path': '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/csv_monitor/', 
-            'job_name': f'{model_args["size"]}-{tag}'
-            # 'team': 'xrliu',
-            # 'project': 'fepe_collie',
-            # 'group': group
+            'job_name': f'{group}-ckpt_{args.ckpt}-{tag}'
         }
     },
     'gradient_clipping': train_args['max_grad_norm'],
@@ -75,28 +73,16 @@ config.ds_config = {
 
 config.__setattr__('pe_config', pe_config)
 
-file_name = './csv_logs/{}-{}.txt'.format(group, tag)
+file_name = './csv_logs/{}-ckpt_{}-{}.txt'.format(group, args.ckpt, tag)
     
 config.__setattr__('file_name', file_name)
 
 tokenizer = model_args['model_path_or_name']
 
-if task['training']:
-    if task['pretrain']:
-        model = LlamaForCausalLM.from_config(config=config)
-    else:
-        model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_args['model_path_or_name'], config=config)
-    # assert env.world_size == train_args['world_size']
-else:
-    if path in ['llama2-7B', 'llama2-13B', ]:
-        model_path_or_name = model_args['model_path_or_name']
-        model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, config=config)
-    else:
-        model_path_or_name = 'p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/pjlab_fepe_{}_4096-{}/epoch_1'.format(model_args['size'].replace('-', '_'), path)
-        model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, 
-                                                 protocol='petrel', config=config)
+model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path, config=config, trust_remote_code=True, 
+                                         protocol='petrel' if model_path.__contains__(':') else 'file')
 
-rank = env.rank  #  int(os.environ["rank"])
+rank = env.rank
 
 if ds_config['dataset'] == 'pile':
     train_length = train_args['max_length']
@@ -116,31 +102,22 @@ if ds_config['dataset'] == 'pile':
     tokenizer, train_dataset, test_datasets = get_pile_for_perplexity(tokenizer=tokenizer, num_data=num_data, 
         train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
     
-elif ds_config['dataset'] == 'leval':
-    assert not task['training']
+elif ds_config['dataset'] == 'pajama':
+    train_length = train_args['max_length']
     test_lengths = ds_config['ext_lengths']
 
-    test_path = 'leval-narrative_qa-llama-{}.pkl'.format(max(test_lengths))
+    test_path = 'books3-test-llama-{}.pkl'.format(max(test_lengths))
 
-    num_training_steps, num_warmup_steps = 0, 0
-
-    from utils.clm_tools_leval import get_leval_for_perplexity
+    num_training_steps, num_warmup_steps = train_args['train_steps'], train_args['warmup_steps']
+    num_data = train_args['train_micro_batch_size'] * env.dp_size * num_training_steps
     
-    tokenizer, train_dataset, test_datasets = get_leval_for_perplexity(tokenizer=tokenizer, subset='narrative_qa',
-        train_length=None, train_path=None, test_lengths=test_lengths, test_path=test_path)
+    print('num_training_steps', num_training_steps, 'num_warmup_steps', num_warmup_steps)
+    print('num_data', num_data, 'num_token', num_data * train_length)
 
-elif ds_config['dataset'] == 'code':
-
-    train_length = train_args['max_length']
-    test_lengths = [max(ds_config['ext_lengths'])]
-
-    num_training_steps, num_warmup_steps = 0, 0
-
-    from utils.clm_tools_starcoder import get_code_for_perplexity
+    from utils.clm_tools_pajama import get_pajama_for_perplexity
     
-    tokenizer, train_dataset, test_datasets = get_code_for_perplexity(
-        train_length=train_length, test_lengths=test_lengths, train_path=None, test_path=None, 
-        tokenizer=tokenizer, langs=['csharp', 'java', 'python', ])
+    tokenizer, train_dataset, test_datasets = get_pajama_for_perplexity(tokenizer=tokenizer, num_data=num_data, 
+        train_length=train_length, train_path=None, test_lengths=test_lengths, test_path=test_path)
 
 else:
     sys.exit()
@@ -167,9 +144,9 @@ else:
 evaluators = []
 
 item = str(max(test_lengths))
-evaluators.append(EvaluatorForExtrapolation(model=model, dataset=test_datasets[item], monitors=[EvalMonitor(config) ], 
+evaluators.append(EvaluatorForExtrapolation(model=model, dataset=test_datasets[item].select(range(env.dp_size * 2)), monitors=[EvalMonitor(config) ], 
                                             config=config, loss_fn=CumGPTLMLoss(max_len=max(test_lengths), ignore_index=1), 
-                                            dynamic_enabled=(pe_config['ntk_option'] == 'dynamic'), dynamic_stride=train_args['max_length'],
+                                            dynamic_enabled=(pe_config['ntk_option'] == 'dynamic'), dynamic_stride=int(pe_config['log_base']),
                                             metrics={'cum#acc': CumAccMetric(gather_result=True), 
                                                      'cum#ppl': CumPPLMetric(gather_result=True)}))
 
@@ -184,7 +161,7 @@ if rank == 0:
     print(config, '\n')
 
 if task['training'] and not group.__contains__('rand') and not group.__contains__('debug'):
-    callbacks = [CheckpointCallback(folder='p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/{}-{}'.format(group, path), model_only=True, 
+    callbacks = [CheckpointCallback(folder='p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/{}-ckpt_{}-{}'.format(group, args.ckpt, tag), model_only=True, 
                                     every_n_epochs=train_args['save_every_n_epochs'], protocol='petrel')]
 else:
     callbacks = []
@@ -215,16 +192,17 @@ try:
     else:
         trainer.eval()
 except BaseException as e:
-    import sys
-    import traceback
-    from rich.console import Console
-    file = open("traceback.log", 'a+')
-    file.write(str(datetime.now()) + "\n\n")
-    sys.stdout = file
-    traceback.print_exc(file=file)
-    file.write("\n\n")
-    Console().print_exception()
-    raise e
+    if env.rank == 0:
+        import sys
+        import traceback
+        from rich.console import Console
+        file = open("traceback.log", 'a+')
+        file.write(str(datetime.now()) + "\n\n")
+        sys.stdout = file
+        traceback.print_exc(file=file)
+        file.write("\n\n")
+        # Console().print_exception()
+        raise e
 
 if env.rank == 0:
     file = open(file_name, 'a')

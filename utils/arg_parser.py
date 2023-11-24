@@ -37,7 +37,7 @@ def arg_parse():
     parser.add_argument('--base', type=float, default=10000.)
     parser.add_argument('--pi_lambda', type=float, default=1.)
 
-    parser.add_argument('--ntk_option', type=str, default='none', choices=['none', 'fixed', 'dynamic'])
+    parser.add_argument('--ntk_option', type=str, default='none', choices=['none', 'fixed', 'dynamic', 'dynamic_new'])
     parser.add_argument('--ntk_alpha', type=float, default=1.)
 
     # parser.add_argument('--post_norm_attn', type=str, default='false')
@@ -49,6 +49,9 @@ def arg_parse():
     # parser.add_argument('--pe_fp', type=str, default='fp32', choices=['fp32', 'fp16', 'bf16'])
     # parser.add_argument('--ffn_fp', type=str, default='fp32', choices=['fp32', 'fp16', 'bf16'])
     # parser.add_argument('--norm_fp', type=str, default='fp32', choices=['fp32', 'fp16', 'bf16'])
+    
+    # parser.add_argument('--local_rank', type=int, default=0)
+    parser.add_argument('--ckpt', type=int, default=0)
 
     parser.add_argument('--tag', type=str, default='')
     parser.add_argument('--path', type=str, default='')
@@ -59,7 +62,7 @@ def arg_parse():
 
     parser.add_argument('--max_length', type=int, default=512)
     parser.add_argument('--model_size', type=str, default='330M', choices=['330M', '3B', 'llama-7B',  
-                                                                           'llama2-7B', 'llama2-13B'])
+                                                                           'llama2-7B', 'llama2-13B', 'llama2-70B'])
     parser.add_argument('--dataset', type=str, default='pile', choices=['arxiv', 'pile', 'leval', 
                                                                         'code', 'pajama', ])
     parser.add_argument('--ext_length', type=str, default='32k', choices=list(ext_dict))
@@ -94,12 +97,12 @@ def arg_parse():
 
     assert args.tag != '' and args.path != '' and args.group != ''
 
-    tag, path, group, pp_size, tp_size = args.tag, args.path, args.group, args.pp_size, args.tp_size
+    tag, path, group = args.tag, args.path, args.group
 
     assert model_size in model_args and (model_size, max_length) in train_args
 
     model_arg, train_arg = model_args[model_size], train_args[(model_size, max_length)]
 
-    return tag, path, group, pp_size, tp_size, task, pe_config, ds_config, model_arg, train_arg  # fp_config, hp_config
+    return tag, path, group, args, task, pe_config, ds_config, model_arg, train_arg  # fp_config, hp_config
 
 

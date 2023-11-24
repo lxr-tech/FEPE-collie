@@ -8,6 +8,10 @@ model_args = {
         'size': 'llama2-13B', 'model_path_or_name': '/mnt/petrelfs/share_data/llm_llama2/llm_llama2/llama-2-13b-hf/',  # "vocab_size": 32000
         'hidden_size': 5120, 'intermediate_size': 13824, 'num_attention_heads': 40, 'num_hidden_layers': 40,
     },    
+    'llama2-70B': {
+        'size': 'llama2-70B', 'model_path_or_name': '/mnt/petrelfs/share_data/llama2_hf/llama-2-70b-hf/',  # "vocab_size": 32000
+        'hidden_size': 8192, 'intermediate_size': 28672, 'num_attention_heads': 64, 'num_hidden_layers': 80,
+    },    
 }
 
 # '/mnt/petrelfs/share_data/llm_llama/llama2/llama-2-7b-hf/',  # in s cluster
@@ -50,5 +54,11 @@ train_args = {
         'optim': 'AdamW', 'learning_rate': 0.00002, 'max_grad_norm': 1, 'weight_decay': 0, 
         'lr_scheduler_type': 'none', 'train_steps': 1024, 'warmup_steps': 0, 
         'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 1,
-    }
+    },
+    ('llama2-70B', 4096): {        
+        'max_length': 4096, 'world_size': 64, 'train_micro_batch_size': 2, 'eval_batch_size': 1, 
+        'optim': 'AdamW', 'learning_rate': 0.00001, 'max_grad_norm': 1, 'weight_decay': 0, 
+        'lr_scheduler_type': 'none', 'train_steps': 1024, 'warmup_steps': 0, 
+        'eval_per_n_steps': 0, 'eval_per_n_epochs': 1, 'save_every_n_epochs': 1,
+    },
 }

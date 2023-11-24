@@ -272,8 +272,10 @@ class LlamaLayer(nn.Module):
         assert hidden_states.ndim == 3, f"hidden_states.shape must be (B, N, H), but got {hidden_states.shape}"
         batch_size, seq_len, _ = hidden_states.shape
         _hidden_states = self.input_layernorm(hidden_states)
+        # print(f"[DEBUG] rank {dist.get_rank()} is before qkv", flush=True)
         query, key, value = self.self_attn["q_proj"](_hidden_states), self.self_attn["k_proj"](
             _hidden_states), self.self_attn["v_proj"](_hidden_states)
+        # print(f"[DEBUG] rank {dist.get_rank()} is after qkv", flush=True)
         query, key, value = rearrange(query, "b n (h d) -> b n h d", d=self.head_dim), \
             rearrange(key, "b n (h d) -> b n h d", d=self.head_dim), \
             rearrange(value, "b n (h d) -> b n h d", d=self.head_dim)

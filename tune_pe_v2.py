@@ -13,12 +13,12 @@ from collie import CollieConfig, Trainer, env
 from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonitor
 from collie import ColliePadder, CheckpointCallback, GPTLMLoss
 
-from models.collie_llama_with_pe import LlamaForCausalLM
+from models.collie_llama_with_pe4 import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation, CumGPTLMLoss, CumPPLMetric, CumAccMetric
 
-tag, path, group, pp_size, tp_size, task, pe_config, ds_config, model_args, train_args = arg_parse()
+tag, path, group, args, task, pe_config, ds_config, model_args, train_args = arg_parse()
 
 config = CollieConfig.from_pretrained(model_args['model_path_or_name'])
 
@@ -31,19 +31,20 @@ if not group.__contains__('rand'):
     torch.cuda.manual_seed_all(config.seed)
     torch.backends.cudnn.deterministic = True
 
-config.pp_size = pp_size
-config.train_micro_batch_size = train_args['train_micro_batch_size'] // pp_size if task['training'] else train_args['train_micro_batch_size'] 
-config.gradient_accumulation_steps = pp_size if task['training'] else 1
+config.pp_size = args.pp_size
+config.tp_size = args.tp_size
+config.train_micro_batch_size = train_args['train_micro_batch_size'] // args.pp_size if task['training'] else train_args['train_micro_batch_size'] 
+config.gradient_accumulation_steps = args.pp_size if task['training'] else 1
 config.eval_batch_size = train_args['eval_batch_size']
 config.train_epochs = 1
 config.eval_per_n_epochs = train_args['eval_per_n_epochs']
 config.eval_per_n_steps = train_args['eval_per_n_steps']
 config.low_cpu_mem_usage = False
 
-config.use_flash = False
+config.use_flash = True
 config.ds_config = {
     'bf16': {
-        'enabled': False,
+        'enabled': True,
     },
     'train_micro_batch_size_per_gpu': config.train_micro_batch_size,  # * config.gradient_accumulation_steps,
     'monitor_config': {
@@ -57,7 +58,7 @@ config.ds_config = {
     },
     'gradient_clipping': train_args['max_grad_norm'],
     'zero_optimization': {
-        "stage": 3 if pp_size == 1 else 0, 
+        "stage": 3 if args.pp_size == 1 else 0, 
     },
 }
 
@@ -147,7 +148,7 @@ evaluators = []
 item = str(max(test_lengths))
 evaluators.append(EvaluatorForExtrapolation(model=model, dataset=test_datasets[item], monitors=[EvalMonitor(config) ], 
                                             config=config, loss_fn=CumGPTLMLoss(max_len=max(test_lengths), ignore_index=1), 
-                                            dynamic_enabled=(pe_config['ntk_option'] == 'dynamic'), dynamic_stride=train_args['max_length'],
+                                            dynamic_enabled=(pe_config['ntk_option'].__contains__('dynamic')), dynamic_stride=train_args['max_length'],
                                             metrics={'cum#acc': CumAccMetric(gather_result=True), 
                                                      'cum#ppl': CumPPLMetric(gather_result=True)}))
 

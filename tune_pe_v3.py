@@ -9,26 +9,56 @@ from datetime import datetime
 
 from transformers import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 
-# import sys
-# sys.path.append('../collie/')
-
 from collie import CollieConfig, Trainer, env
 from collie import EvalMonitor, LossMonitor, LRMonitor, TGSMonitor, MemoryMonitor
 from collie import ColliePadder, CheckpointCallback, GPTLMLoss
 
-from models.collie_llama_with_pe import LlamaForCausalLM
+from models.collie_llama_with_pe4 import LlamaForCausalLM
 
 from utils.arg_parser import arg_parse
 from utils.clm_tools_acc import EvaluatorForExtrapolation, CumGPTLMLoss, CumPPLMetric, CumAccMetric
 
 tag, path, group, args, task, pe_config, ds_config, model_args, train_args = arg_parse()
+"""
+paths = {'scaling_rope-1B_b500_v0-ckpt_s4000': 'qianxuesen_1B/xingshuhao_v_0_2_4/4000/', 
+         'scaling_rope-1B_b500_v0-ckpt_s12000': 'qianxuesen_1B/xingshuhao_v_0_2_4/12000/', 
+         'scaling_rope-1B_b500_v1-ckpt_s2000': 'qianxuesen_1B/xingshuhao_v_0_2_5/2000', 
+         'scaling_rope-1B_b500_v1-ckpt_s4000': 'qianxuesen_1B/xingshuhao_v_0_2_5/4000/', 
+         'scaling_rope-1B_b500_v1-ckpt_s8000': 'qianxuesen_1B/xingshuhao_v_0_2_5/8000/', 
+         'scaling_rope-1B_b500_v1-ckpt_s16000': 'qianxuesen_1B/xingshuhao_v_0_2_5/16000/', 
+         'scaling_rope-1B_b500_v1-ckpt_s32000': 'qianxuesen_1B/xingshuhao_v_0_2_5/32000/', 
+         'scaling_rope-1B_b500_v1-ckpt_s64000': 'qianxuesen_1B/xingshuhao_v_0_2_5/64000/', 
+         'scaling_rope-7B_b500_v0-ckpt_s18000': 'official_qianxuesen_base_500_7B_v1.0.0/18000', 
+         'scaling_rope-7B_b500_v1-ckpt_s11000': 'official_qianxuesen_base_500_7B_v1.0.1/11000', 
+         'scaling_rope-7B_b500_v1-ckpt_s18000': 'official_qianxuesen_base_500_7B_v1.0.1/18000', 
+         'scaling_rope-7B_b500_v1-ckpt_s18000_ft': 'official_qianxuesen_base_500_7B_v1.0.1_18000step_base_10000_fp/1024/', 
+         }
+"""
+paths = {'shuxingbei_1B_b10000': 'official_Shuxingbei_1B_b10000', 
+         'shuxingbei_1B_b10000_log': 'official_Shuxingbei_1B_b10000_log', 
+         'shuxingbei_1B_b2608': 'official_Shuxingbei_1B_b2608', 
+         'shuxingbei_1B_b2608_log': 'official_Shuxingbei_1B_b2608_log', 
+         'shuxingbei_1B_b1304': 'official_Shuxingbei_1B_b1304', 
+         'shuxingbei_1B_b1304_log': 'official_Shuxingbei_1B_b1304_log', 
+         'shuxingbei_llama2_7B_b500000_fp': 'official_Shuxingbei_7B_llama2base500000', 
+         'shuxingbei_llama2_7B_b2000000_fp': 'official_Shuxingbei_7B_llama2base2000000',
+         'shuxingbei_llama2_7B_b2000000_fp2': 'official_Shuxingbei_7B_llama2base2000000_fix_weightdecay',
+         'shuxingbei_llama2_7B_b2000000_fp2_16K': 'official_Shuxingbei_7B_llama2base2000000_fix_weightdecay_16k_context',
+         'qianxuesen_7B': 'official_qianxuesen_7B_v1.0.0', 
+         'shuxingbei_7B_b500': 'official_Shuxingbei_7B_b500', 
+         'shuxingbei_7B_b500-ckpt50000_b10000_fp': 'official_Shuxingbei_7B_b500_fp10000', 
+         'shuxingbei_7B_b500-ckpt80000_b10000_fp': 'official_Shuxingbei_7B_b500_fp10000_from80000', 
+        #  'shuxingbei_7B_b500_b10000_fp': 'official_Shuxingbei_7B_b500_fp10000',
+         }
 
-config = CollieConfig.from_pretrained(model_args['model_path_or_name'])
+root_f = '/mnt/petrelfs/share_data/xingshuhao/exported_transformers'
+root_p = 'p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints'
 
-# assert config.model_config.hidden_size == model_args['hidden_size']
-# assert config.model_config.intermediate_size == model_args['intermediate_size']
-# assert config.model_config.num_attention_heads == model_args['num_attention_heads']
-# assert config.model_config.num_hidden_layers == model_args['num_hidden_layers']
+config_path = f'{root_f}/{paths[group]}/{args.ckpt}/'
+
+model_path = f'{root_f}/{paths[group]}/{args.ckpt}/' if path in paths else '{}/{}-ckpt_{}-{}/epoch_1/'.format(root_p, group, args.ckpt, path)
+
+config = CollieConfig.from_pretrained(config_path, trust_remote_code=True)
 
 config.model_config.use_cache = False
 config.checkpointing = True
@@ -56,15 +86,12 @@ config.ds_config = {
     },
     'train_micro_batch_size_per_gpu': config.train_micro_batch_size,  # * config.gradient_accumulation_steps,
     'monitor_config': {
-        'enabled': True,
-        'tag': f'{model_args["size"]}-{tag}-',  # tag
+        'enabled': task['training'],
+        'tag': f'{group}-ckpt_{args.ckpt}-{tag}-',  # tag
         'csv_monitor': {  # wandb
             'enabled': task['training'],
             'output_path': '/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/csv_monitor/', 
-            'job_name': f'{model_args["size"]}-{tag}'
-            # 'team': 'xrliu',
-            # 'project': 'fepe_collie',
-            # 'group': group
+            'job_name': f'{group}-ckpt_{args.ckpt}-{tag}'
         }
     },
     'gradient_clipping': train_args['max_grad_norm'],
@@ -75,28 +102,16 @@ config.ds_config = {
 
 config.__setattr__('pe_config', pe_config)
 
-file_name = './csv_logs/{}-{}.txt'.format(group, tag)
+file_name = './csv_logs/{}-ckpt_{}-{}.txt'.format(group, args.ckpt, tag)
     
 config.__setattr__('file_name', file_name)
 
 tokenizer = model_args['model_path_or_name']
 
-if task['training']:
-    if task['pretrain']:
-        model = LlamaForCausalLM.from_config(config=config)
-    else:
-        model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_args['model_path_or_name'], config=config)
-    # assert env.world_size == train_args['world_size']
-else:
-    if path in ['llama2-7B', 'llama2-13B', ]:
-        model_path_or_name = model_args['model_path_or_name']
-        model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, config=config)
-    else:
-        model_path_or_name = 'p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/pjlab_fepe_{}_4096-{}/epoch_1'.format(model_args['size'].replace('-', '_'), path)
-        model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path_or_name, 
-                                                 protocol='petrel', config=config)
+model = LlamaForCausalLM.from_pretrained(model_path_or_name=model_path, config=config, trust_remote_code=True, 
+                                         protocol='petrel' if model_path.__contains__(':') else 'file')
 
-rank = env.rank  #  int(os.environ["rank"])
+rank = env.rank
 
 if ds_config['dataset'] == 'pile':
     train_length = train_args['max_length']
@@ -116,31 +131,22 @@ if ds_config['dataset'] == 'pile':
     tokenizer, train_dataset, test_datasets = get_pile_for_perplexity(tokenizer=tokenizer, num_data=num_data, 
         train_length=train_length, train_path=train_path, test_lengths=test_lengths, test_path=test_path)
     
-elif ds_config['dataset'] == 'leval':
-    assert not task['training']
+elif ds_config['dataset'] == 'pajama':
+    train_length = train_args['max_length']
     test_lengths = ds_config['ext_lengths']
 
-    test_path = 'leval-narrative_qa-llama-{}.pkl'.format(max(test_lengths))
+    test_path = 'books3-test-llama-{}.pkl'.format(max(test_lengths))
 
-    num_training_steps, num_warmup_steps = 0, 0
-
-    from utils.clm_tools_leval import get_leval_for_perplexity
+    num_training_steps, num_warmup_steps = train_args['train_steps'], train_args['warmup_steps']
+    num_data = train_args['train_micro_batch_size'] * env.dp_size * num_training_steps
     
-    tokenizer, train_dataset, test_datasets = get_leval_for_perplexity(tokenizer=tokenizer, subset='narrative_qa',
-        train_length=None, train_path=None, test_lengths=test_lengths, test_path=test_path)
+    print('num_training_steps', num_training_steps, 'num_warmup_steps', num_warmup_steps)
+    print('num_data', num_data, 'num_token', num_data * train_length)
 
-elif ds_config['dataset'] == 'code':
-
-    train_length = train_args['max_length']
-    test_lengths = [max(ds_config['ext_lengths'])]
-
-    num_training_steps, num_warmup_steps = 0, 0
-
-    from utils.clm_tools_starcoder import get_code_for_perplexity
+    from utils.clm_tools_pajama import get_pajama_for_perplexity
     
-    tokenizer, train_dataset, test_datasets = get_code_for_perplexity(
-        train_length=train_length, test_lengths=test_lengths, train_path=None, test_path=None, 
-        tokenizer=tokenizer, langs=['csharp', 'java', 'python', ])
+    tokenizer, train_dataset, test_datasets = get_pajama_for_perplexity(tokenizer=tokenizer, num_data=num_data, 
+        train_length=train_length, train_path=None, test_lengths=test_lengths, test_path=test_path)
 
 else:
     sys.exit()
@@ -184,7 +190,7 @@ if rank == 0:
     print(config, '\n')
 
 if task['training'] and not group.__contains__('rand') and not group.__contains__('debug'):
-    callbacks = [CheckpointCallback(folder='p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/{}-{}'.format(group, path), model_only=True, 
+    callbacks = [CheckpointCallback(folder='p_ssd:s3://P_model_weights/liuxiaoran/FEPE-collie/checkpoints/{}-ckpt_{}-{}'.format(group, args.ckpt, tag), model_only=True, 
                                     every_n_epochs=train_args['save_every_n_epochs'], protocol='petrel')]
 else:
     callbacks = []
@@ -215,16 +221,17 @@ try:
     else:
         trainer.eval()
 except BaseException as e:
-    import sys
-    import traceback
-    from rich.console import Console
-    file = open("traceback.log", 'a+')
-    file.write(str(datetime.now()) + "\n\n")
-    sys.stdout = file
-    traceback.print_exc(file=file)
-    file.write("\n\n")
-    Console().print_exception()
-    raise e
+    if env.rank == 0:
+        import sys
+        import traceback
+        from rich.console import Console
+        file = open("traceback.log", 'a+')
+        file.write(str(datetime.now()) + "\n\n")
+        sys.stdout = file
+        traceback.print_exc(file=file)
+        file.write("\n\n")
+        # Console().print_exception()
+        raise e
 
 if env.rank == 0:
     file = open(file_name, 'a')

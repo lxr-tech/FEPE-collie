@@ -29,8 +29,8 @@ p_sk="2kQa41IjD34XPZMPITNyuTbrqDemNeA7Bzrb0q9O"  # vGnnSeXhByGRHF1JtnSvNCVwHpGEM
 
 # dst="/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/caches/"
 # src="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/liuxiaoran/FEPE-collie/caches/"  # in .7.251 out .3.251
-src="/mnt/petrelfs/liuxiaoran/projects/FEPE-collie/csv_logs/"
-dst="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/liuxiaoran/FEPE-collie/csv_logs/"  # in .7.251 out .3.251
+src="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/liuxiaoran/FEPE-collie/checkpoints/scaling_rope-1B_pretrain_b500-base_500/"
+dst="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/liuxiaoran/FEPE-collie/checkpoints/scaling_rope-1B_b500_v0-ckpt_s4000-base_500/"  # in .7.251 out .3.251
 
 # src="/mnt/petrelfs/share_data/llm_llama/llama2/llama-2-13b-hf/"
 # src="s3://${p_ak}:${p_sk}@P_model_weights.10.135.3.251:80/llm_model/llm_llama2/llama-2-13b-hf/"

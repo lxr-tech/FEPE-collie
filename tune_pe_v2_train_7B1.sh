@@ -96,9 +96,25 @@
 #  --base=600000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
 #  --tag='base_600000' --path='base_600000' --group='scaling_rope-llama2_7B'
 # wait
-srun -p llm_t --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
- --kill-on-bad-exit=1 -w HOST-10-140-66-[134,181,186,195] python tune_pe_v2.py --task_a='finetune' --task_b='training' \
- --model_size='llama2-7B' --max_length=4096 --dataset='pajama' --ext_length='100k' \
- --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
- --base=500 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
- --tag='base_500_bf32' --path='base_500_bf32' --group='scaling_rope-llama2_7B'
+# srun -p llm_t --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-[134,181,186,195] python tune_pe_v2.py --task_a='finetune' --task_b='training' \
+#  --model_size='llama2-7B' --max_length=4096 --dataset='pajama' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=500 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='base_500_bf32' --path='base_500_bf32' --group='scaling_rope-llama2_7B'
+# wait
+# srun -p llm2_t --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-[193-196] python tune_pe_v2.py --task_a='finetune' --task_b='training' \
+#  --model_size='llama2-7B' --max_length=4096 --dataset='pajama' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=2000000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='base_2000000' --path='base_2000000' --group='scaling_rope-llama2_7B'
+# wait
+# srun -p llm2_t --ntasks=32 --ntasks-per-node=8 --gres=gpu:8 --quotatype=reserved \
+#  --kill-on-bad-exit=1 -w HOST-10-140-66-[193-196] python tune_pe_v2.py --task_a='finetune' --task_b='training' \
+#  --model_size='llama2-7B' --max_length=16384 --dataset='pajama' --ext_length='100k' \
+#  --dim='2d' --exp='rope' --imp='inv' --ln='raw' --log_base=4096 --exp_base=4096 \
+#  --base=2000000 --pi_lambda=1 --ntk_option='none' --ntk_alpha=1 \
+#  --tag='base_2000000_16k' --path='base_2000000_16k' --group='scaling_rope-llama2_7B'
+
+# squeue | grep liuxiao | awk '{print $1}' | xargs scancel
